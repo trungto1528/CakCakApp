@@ -1,3 +1,4 @@
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -22,6 +23,9 @@ class _CrawlScreenState extends State<CrawlScreen> {
 
   List<String> websites = [];
   String? selectedWebsite;
+
+  // URL truyện hiện tại, dùng để xác định Referer ảnh bìa.
+  String? _currentStoryUrl;
 
   bool loading = false;
   bool searching = false;
@@ -74,13 +78,50 @@ class _CrawlScreenState extends State<CrawlScreen> {
   List<Map<String, dynamic>> get selectedChapters {
     return chapters
         .where((chapter) {
-          final map = chapter as Map;
-          return !_isCrawled(map) && map['choosen'] == true;
-        })
+      final map = chapter as Map;
+      return !_isCrawled(map) && map['choosen'] == true;
+    })
         .map<Map<String, dynamic>>(
           (chapter) => Map<String, dynamic>.from(chapter as Map),
-        )
+    )
         .toList();
+  }
+
+  /// Lấy domain gốc từ URL website đang cào.
+  /// Ví dụ:
+  /// https://www.mangahere.cc/manga/example/
+  /// -> https://www.mangahere.cc/
+  String _getWebsiteReferer(String? url) {
+    if (url == null || url.trim().isEmpty) {
+      return 'https://www.mangahere.cc/';
+    }
+
+    final uri = Uri.tryParse(url.trim());
+
+    if (uri == null ||
+        !uri.hasAuthority ||
+        (uri.scheme != 'http' && uri.scheme != 'https')) {
+      return 'https://www.mangahere.cc/';
+    }
+
+    return '${uri.scheme}://${uri.authority}/';
+  }
+
+  /// Header dùng khi Flutter tải ảnh bìa trực tiếp.
+  Map<String, String> _imageHeaders(String? storyUrl) {
+    return {
+      'Referer': _getWebsiteReferer(storyUrl),
+      'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+          'AppleWebKit/537.36 (KHTML, like Gecko) '
+          'Chrome/146.0.0.0 Safari/537.36',
+    };
+  }
+
+  String _getResultUrl(Map<String, dynamic> result) {
+    return result['url']?.toString().trim() ??
+        result['storyUrl']?.toString().trim() ??
+        '';
   }
 
   // =========================================================
@@ -146,6 +187,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
       searching = true;
       searchResults = [];
       data = null;
+      _currentStoryUrl = null;
     });
 
     try {
@@ -177,7 +219,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
   // =========================================================
 
   Future<void> selectSearchResult(Map<String, dynamic> result) async {
-    final url = result['url']?.toString().trim() ?? '';
+    final url = _getResultUrl(result);
 
     if (url.isEmpty) {
       _showSnackBar('Không có URL truyện');
@@ -191,6 +233,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
     setState(() {
       loading = true;
       data = null;
+      _currentStoryUrl = url;
     });
 
     try {
@@ -201,15 +244,15 @@ class _CrawlScreenState extends State<CrawlScreen> {
       final normalizedData = Map<String, dynamic>.from(resultData);
       final rawChapters = normalizedData['chapters'] as List? ?? [];
 
+      // Giữ URL truyện để tạo Referer cho ảnh bìa.
+      normalizedData['url'] ??= url;
+
       normalizedData['chapters'] = rawChapters.map((rawChapter) {
         final chapter = Map<String, dynamic>.from(rawChapter as Map);
 
-        // Giữ trạng thái isCrawled do backend trả về.
         final isCrawled = _isCrawled(chapter);
 
         chapter['crawled'] = isCrawled;
-
-        // Đã crawl thì bỏ chọn, chưa crawl thì chọn mặc định.
         chapter['choosen'] = !isCrawled;
 
         return chapter;
@@ -238,6 +281,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
     setState(() {
       data = null;
       searchResults = [];
+      _currentStoryUrl = null;
     });
   }
 
@@ -252,7 +296,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
       for (final rawChapter in chapters) {
         final chapter = rawChapter as Map;
 
-        // Không chọn lại chapter đã crawl.
         if (_isCrawled(chapter)) {
           chapter['choosen'] = false;
         } else {
@@ -263,7 +306,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
   }
 
   void toggle(Map chapter, bool value) {
-    // Không cho chọn chapter đã crawl.
     if (_isCrawled(chapter)) return;
 
     setState(() {
@@ -290,7 +332,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
     try {
       final payload = Map<String, dynamic>.from(data!);
 
-      // Chỉ gửi chapter được chọn và chưa crawl.
       payload['chapters'] = selectedChapters;
 
       final res = await crawlService.importStory(payload, widget.userId);
@@ -391,7 +432,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
                             : 0.0;
 
                         final message = task['message']?.toString() ?? '';
-
                         final isDone = _isTaskDone(message);
 
                         return ListTile(
@@ -411,30 +451,30 @@ class _CrawlScreenState extends State<CrawlScreen> {
                           ),
                           trailing: isDone
                               ? const Icon(
-                                  Icons.check_circle,
-                                  color: Colors.green,
-                                )
+                            Icons.check_circle,
+                            color: Colors.green,
+                          )
                               : IconButton(
-                                  icon: const Icon(
-                                    Icons.stop_circle_outlined,
-                                    color: Colors.red,
-                                  ),
-                                  tooltip: 'Hủy task',
-                                  onPressed: () async {
-                                    try {
-                                      await crawlService.cancelTask(
-                                        taskId.toString(),
-                                      );
+                            icon: const Icon(
+                              Icons.stop_circle_outlined,
+                              color: Colors.red,
+                            ),
+                            tooltip: 'Hủy task',
+                            onPressed: () async {
+                              try {
+                                await crawlService.cancelTask(
+                                  taskId.toString(),
+                                );
 
-                                      if (!sheetContext.mounted) return;
+                                if (!sheetContext.mounted) return;
 
-                                      Navigator.pop(sheetContext);
-                                      _showAllTasksSheet();
-                                    } catch (e) {
-                                      _showSnackBar('Lỗi hủy task: $e');
-                                    }
-                                  },
-                                ),
+                                Navigator.pop(sheetContext);
+                                _showAllTasksSheet();
+                              } catch (e) {
+                                _showSnackBar('Lỗi hủy task: $e');
+                              }
+                            },
+                          ),
                         );
                       },
                     ),
@@ -511,7 +551,9 @@ class _CrawlScreenState extends State<CrawlScreen> {
 
   Widget _buildSearchResults() {
     if (searching || loadingWebsites) {
-      return const Expanded(child: Center(child: CircularProgressIndicator()));
+      return const Expanded(
+        child: Center(child: CircularProgressIndicator()),
+      );
     }
 
     if (websites.isEmpty) {
@@ -536,6 +578,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
 
           final title = result['title']?.toString() ?? '';
           final cover = result['cover']?.toString() ?? '';
+          final storyUrl = _getResultUrl(result);
 
           return Card(
             clipBehavior: Clip.antiAlias,
@@ -545,12 +588,14 @@ class _CrawlScreenState extends State<CrawlScreen> {
                 borderRadius: BorderRadius.circular(6),
                 child: cover.isNotEmpty
                     ? Image.network(
-                        cover,
-                        width: 60,
-                        height: 85,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _searchCoverPlaceholder(),
-                      )
+                  cover,
+                  headers: _imageHeaders(storyUrl),
+                  width: 60,
+                  height: 85,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) =>
+                      _searchCoverPlaceholder(),
+                )
                     : _searchCoverPlaceholder(),
               ),
               title: Text(
@@ -609,20 +654,20 @@ class _CrawlScreenState extends State<CrawlScreen> {
       floatingActionButton: data == null
           ? null
           : FloatingActionButton.extended(
-              onPressed: importing ? null : submit,
-              icon: importing
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.cloud_download),
-              label: Text(
-                importing
-                    ? 'Đang import...'
-                    : 'Import (${selectedChapters.length})',
-              ),
-            ),
+        onPressed: importing ? null : submit,
+        icon: importing
+            ? const SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        )
+            : const Icon(Icons.cloud_download),
+        label: Text(
+          importing
+              ? 'Đang import...'
+              : 'Import (${selectedChapters.length})',
+        ),
+      ),
       body: Column(
         children: [
           Padding(
@@ -647,12 +692,13 @@ class _CrawlScreenState extends State<CrawlScreen> {
               onChanged: loadingWebsites || loading || importing
                   ? null
                   : (value) {
-                      setState(() {
-                        selectedWebsite = value;
-                        searchResults = [];
-                        data = null;
-                      });
-                    },
+                setState(() {
+                  selectedWebsite = value;
+                  searchResults = [];
+                  data = null;
+                  _currentStoryUrl = null;
+                });
+              },
             ),
           ),
           Padding(
@@ -705,6 +751,12 @@ class _CrawlScreenState extends State<CrawlScreen> {
 
   Widget _buildStoryHeader() {
     final chapterList = chapters;
+    final cover = data!['cover']?.toString() ?? '';
+
+    final storyUrl = _currentStoryUrl ??
+        data!['url']?.toString() ??
+        data!['cleanedUrl']?.toString() ??
+        '';
 
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -716,16 +768,15 @@ class _CrawlScreenState extends State<CrawlScreen> {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child:
-                    data!['cover'] != null &&
-                        data!['cover'].toString().isNotEmpty
+                child: cover.isNotEmpty
                     ? Image.network(
-                        data!['cover'].toString(),
-                        width: 100,
-                        height: 140,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _coverPlaceholder(),
-                      )
+                  cover,
+                  headers: _imageHeaders(storyUrl),
+                  width: 100,
+                  height: 140,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => _coverPlaceholder(),
+                )
                     : _coverPlaceholder(),
               ),
               const SizedBox(width: 16),
@@ -743,7 +794,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
                     const SizedBox(height: 8),
                     Text(
                       'Tác giả: '
-                      '${data!['author']?.toString().isNotEmpty == true ? data!['author'] : 'Ẩn danh'}',
+                          '${data!['author']?.toString().isNotEmpty == true ? data!['author'] : 'Ẩn danh'}',
                     ),
                     const SizedBox(height: 4),
                     Text('Tổng chương: ${chapterList.length}'),
@@ -944,8 +995,8 @@ class _CrawlScreenState extends State<CrawlScreen> {
           onTap: isCrawled
               ? null
               : () {
-                  toggle(chapter, chapter['choosen'] != true);
-                },
+            toggle(chapter, chapter['choosen'] != true);
+          },
         );
       }).toList(),
     );
@@ -970,7 +1021,8 @@ class _ProgressSheetContent extends StatefulWidget {
   });
 
   @override
-  State<_ProgressSheetContent> createState() => _ProgressSheetContentState();
+  State<_ProgressSheetContent> createState() =>
+      _ProgressSheetContentState();
 }
 
 class _ProgressSheetContentState extends State<_ProgressSheetContent> {
@@ -987,7 +1039,10 @@ class _ProgressSheetContentState extends State<_ProgressSheetContent> {
     super.initState();
 
     _refreshTask();
-    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _refreshTask());
+    _timer = Timer.periodic(
+      const Duration(seconds: 2),
+          (_) => _refreshTask(),
+    );
   }
 
   @override
@@ -1085,7 +1140,10 @@ class _ProgressSheetContentState extends State<_ProgressSheetContent> {
           children: [
             Text(
               _task!['title']?.toString() ?? '',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 20),
@@ -1103,8 +1161,8 @@ class _ProgressSheetContentState extends State<_ProgressSheetContent> {
               style: TextStyle(
                 color: isDone
                     ? (message.contains('Hoàn thành')
-                          ? Colors.green
-                          : Colors.red)
+                    ? Colors.green
+                    : Colors.red)
                     : Colors.blue,
                 fontWeight: FontWeight.w500,
               ),
@@ -1118,22 +1176,24 @@ class _ProgressSheetContentState extends State<_ProgressSheetContent> {
                       onPressed: _canceling
                           ? null
                           : () async {
-                              setState(() {
-                                _canceling = true;
-                              });
+                        setState(() {
+                          _canceling = true;
+                        });
 
-                              await widget.onCancel();
+                        await widget.onCancel();
 
-                              if (mounted) {
-                                setState(() {
-                                  _canceling = false;
-                                });
-                              }
-                            },
+                        if (mounted) {
+                          setState(() {
+                            _canceling = false;
+                          });
+                        }
+                      },
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.red,
                       ),
-                      child: Text(_canceling ? 'Đang hủy...' : 'Hủy cào'),
+                      child: Text(
+                        _canceling ? 'Đang hủy...' : 'Hủy cào',
+                      ),
                     ),
                   ),
                 if (!isDone) const SizedBox(width: 12),
