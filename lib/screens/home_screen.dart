@@ -24,7 +24,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with RouteAware {
   String? lastStoryTitle;
-  int? lastChapterNumber;
+  double? lastChapterNumber;
   late List storyList;
   late Future<List<dynamic>> latestStoriesFuture;
   bool isSearching = false;
@@ -72,7 +72,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
 
     String? storyTitle;
     String? cover;
-    int? chapterNumber;
+    double? chapterNumber;
 
     int? uid;
 

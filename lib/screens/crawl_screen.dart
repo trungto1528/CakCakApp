@@ -1,4 +1,3 @@
-
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -8,29 +7,34 @@ import '../services/crawl_service.dart';
 class CrawlScreen extends StatefulWidget {
   final int userId;
 
-  const CrawlScreen({
-    super.key,
-    required this.userId,
-  });
+  const CrawlScreen({super.key, required this.userId});
 
   @override
   State<CrawlScreen> createState() => _CrawlScreenState();
 }
 
 class _CrawlScreenState extends State<CrawlScreen> {
-  final TextEditingController searchController =
-  TextEditingController();
-
+  final TextEditingController searchController = TextEditingController();
   final CrawlService crawlService = CrawlService();
 
   Map<String, dynamic>? data;
   List<Map<String, dynamic>> searchResults = [];
 
+  List<String> websites = [];
+  String? selectedWebsite;
+
   bool loading = false;
   bool searching = false;
   bool importing = false;
+  bool loadingWebsites = false;
 
   Timer? _progressTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    loadWebsites();
+  }
 
   @override
   void dispose() {
@@ -49,6 +53,11 @@ class _CrawlScreenState extends State<CrawlScreen> {
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
+  bool _isCrawled(Map chapter) {
+    return chapter['crawled'] == true ||
+        chapter['crawled']?.toString().toLowerCase() == 'true';
+  }
+
   bool _isTaskDone(String message) {
     final lower = message.toLowerCase();
 
@@ -64,13 +73,51 @@ class _CrawlScreenState extends State<CrawlScreen> {
 
   List<Map<String, dynamic>> get selectedChapters {
     return chapters
-        .where((chapter) => chapter['choosen'] == true)
+        .where((chapter) {
+          final map = chapter as Map;
+          return !_isCrawled(map) && map['choosen'] == true;
+        })
         .map<Map<String, dynamic>>(
-          (chapter) => Map<String, dynamic>.from(
-        chapter as Map,
-      ),
-    )
+          (chapter) => Map<String, dynamic>.from(chapter as Map),
+        )
         .toList();
+  }
+
+  // =========================================================
+  // LOAD WEBSITES
+  // =========================================================
+
+  Future<void> loadWebsites() async {
+    setState(() {
+      loadingWebsites = true;
+    });
+
+    try {
+      final results = await crawlService.getSupportedWebsites();
+
+      if (!mounted) return;
+
+      setState(() {
+        websites = results.where((name) => name.isNotEmpty).toSet().toList();
+
+        if (!websites.contains(selectedWebsite)) {
+          selectedWebsite = websites.isNotEmpty ? websites.first : null;
+        }
+      });
+
+      if (websites.isEmpty) {
+        _showSnackBar('Backend chưa đăng ký website cào nào');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _showSnackBar('Lỗi tải danh sách website: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          loadingWebsites = false;
+        });
+      }
+    }
   }
 
   // =========================================================
@@ -79,11 +126,19 @@ class _CrawlScreenState extends State<CrawlScreen> {
 
   Future<void> searchStories() async {
     final keyword = searchController.text.trim();
+    final website = selectedWebsite;
+
+    if (website == null || website.isEmpty) {
+      _showSnackBar('Vui lòng chọn website');
+      return;
+    }
 
     if (keyword.isEmpty) {
       _showSnackBar('Vui lòng nhập tên truyện');
       return;
     }
+
+    if (searching) return;
 
     FocusScope.of(context).unfocus();
 
@@ -94,8 +149,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
     });
 
     try {
-      final results =
-      await crawlService.searchStories(keyword);
+      final results = await crawlService.searchStories(website, keyword);
 
       if (!mounted) return;
 
@@ -104,7 +158,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
       });
 
       if (results.isEmpty) {
-        _showSnackBar('Không tìm thấy truyện');
+        _showSnackBar('Không tìm thấy truyện trên $website');
       }
     } catch (e) {
       if (!mounted) return;
@@ -122,15 +176,15 @@ class _CrawlScreenState extends State<CrawlScreen> {
   // SELECT SEARCH RESULT
   // =========================================================
 
-  Future<void> selectSearchResult(
-      Map<String, dynamic> result,
-      ) async {
+  Future<void> selectSearchResult(Map<String, dynamic> result) async {
     final url = result['url']?.toString().trim() ?? '';
 
     if (url.isEmpty) {
       _showSnackBar('Không có URL truyện');
       return;
     }
+
+    if (loading) return;
 
     FocusScope.of(context).unfocus();
 
@@ -140,27 +194,26 @@ class _CrawlScreenState extends State<CrawlScreen> {
     });
 
     try {
-      final resultData =
-      await crawlService.crawlStory(url);
+      final resultData = await crawlService.crawlStory(url);
 
       if (!mounted) return;
 
-      final normalizedData =
-      Map<String, dynamic>.from(resultData);
+      final normalizedData = Map<String, dynamic>.from(resultData);
+      final rawChapters = normalizedData['chapters'] as List? ?? [];
 
-      final rawChapters =
-          normalizedData['chapters'] as List? ?? [];
+      normalizedData['chapters'] = rawChapters.map((rawChapter) {
+        final chapter = Map<String, dynamic>.from(rawChapter as Map);
 
-      // Mỗi chương có thể được chọn riêng.
-      normalizedData['chapters'] =
-          rawChapters.map((rawChapter) {
-            final chapter = Map<String, dynamic>.from(
-              rawChapter as Map,
-            );
+        // Giữ trạng thái isCrawled do backend trả về.
+        final isCrawled = _isCrawled(chapter);
 
-            chapter['choosen'] = true;
-            return chapter;
-          }).toList();
+        chapter['crawled'] = isCrawled;
+
+        // Đã crawl thì bỏ chọn, chưa crawl thì chọn mặc định.
+        chapter['choosen'] = !isCrawled;
+
+        return chapter;
+      }).toList();
 
       setState(() {
         data = normalizedData;
@@ -196,13 +249,23 @@ class _CrawlScreenState extends State<CrawlScreen> {
     if (data == null) return;
 
     setState(() {
-      for (final chapter in chapters) {
-        chapter['choosen'] = value;
+      for (final rawChapter in chapters) {
+        final chapter = rawChapter as Map;
+
+        // Không chọn lại chapter đã crawl.
+        if (_isCrawled(chapter)) {
+          chapter['choosen'] = false;
+        } else {
+          chapter['choosen'] = value;
+        }
       }
     });
   }
 
   void toggle(Map chapter, bool value) {
+    // Không cho chọn chapter đã crawl.
+    if (_isCrawled(chapter)) return;
+
     setState(() {
       chapter['choosen'] = value;
     });
@@ -214,7 +277,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
 
   Future<void> submit() async {
     if (data == null || selectedChapters.isEmpty) {
-      _showSnackBar('Vui lòng chọn ít nhất 1 chương');
+      _showSnackBar('Vui lòng chọn ít nhất 1 chương chưa crawl');
       return;
     }
 
@@ -225,23 +288,17 @@ class _CrawlScreenState extends State<CrawlScreen> {
     });
 
     try {
-      // Chỉ gửi những chương đã được chọn.
       final payload = Map<String, dynamic>.from(data!);
+
+      // Chỉ gửi chapter được chọn và chưa crawl.
       payload['chapters'] = selectedChapters;
 
-      final res = await crawlService.importStory(
-        payload,
-        widget.userId,
-      );
+      final res = await crawlService.importStory(payload, widget.userId);
 
       final taskId = res['taskId']?.toString();
 
-      if (taskId == null ||
-          taskId.isEmpty ||
-          taskId == 'null') {
-        _showSnackBar(
-          'Không nhận được taskId từ server',
-        );
+      if (taskId == null || taskId.isEmpty || taskId == 'null') {
+        _showSnackBar('Không nhận được taskId từ server');
         return;
       }
 
@@ -268,11 +325,9 @@ class _CrawlScreenState extends State<CrawlScreen> {
   void _showSnackBar(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-      ),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   // =========================================================
@@ -284,36 +339,26 @@ class _CrawlScreenState extends State<CrawlScreen> {
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(20),
-        ),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (sheetContext) {
         return SizedBox(
-          height:
-          MediaQuery.of(sheetContext).size.height * 0.75,
+          height: MediaQuery.of(sheetContext).size.height * 0.75,
           child: FutureBuilder<Map<String, dynamic>>(
             future: crawlService.getAllTasks(),
             builder: (context, snapshot) {
-              if (snapshot.connectionState ==
-                  ConnectionState.waiting) {
-                return const Center(
-                  child: CircularProgressIndicator(),
-                );
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
               }
 
               if (snapshot.hasError) {
-                return Center(
-                  child: Text('Lỗi: ${snapshot.error}'),
-                );
+                return Center(child: Text('Lỗi: ${snapshot.error}'));
               }
 
               final tasks = snapshot.data ?? {};
 
               if (tasks.isEmpty) {
-                return const Center(
-                  child: Text('Không có tiến trình nào'),
-                );
+                return const Center(child: Text('Không có tiến trình nào'));
               }
 
               return Column(
@@ -332,25 +377,20 @@ class _CrawlScreenState extends State<CrawlScreen> {
                     child: ListView.builder(
                       itemCount: tasks.length,
                       itemBuilder: (context, index) {
-                        final taskId =
-                        tasks.keys.elementAt(index);
+                        final taskId = tasks.keys.elementAt(index);
 
                         final task = Map<String, dynamic>.from(
                           tasks[taskId] as Map,
                         );
 
-                        final processed =
-                        _asInt(task['processed']);
-
+                        final processed = _asInt(task['processed']);
                         final total = _asInt(task['total']);
 
                         final double progress = total > 0
-                            ? (processed / total)
-                            .clamp(0.0, 1.0)
+                            ? (processed / total).clamp(0.0, 1.0)
                             : 0.0;
 
-                        final message =
-                            task['message']?.toString() ?? '';
+                        final message = task['message']?.toString() ?? '';
 
                         final isDone = _isTaskDone(message);
 
@@ -361,57 +401,46 @@ class _CrawlScreenState extends State<CrawlScreen> {
                             overflow: TextOverflow.ellipsis,
                           ),
                           subtitle: Column(
-                            crossAxisAlignment:
-                            CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const SizedBox(height: 6),
-                              LinearProgressIndicator(
-                                value: progress,
-                              ),
+                              LinearProgressIndicator(value: progress),
                               const SizedBox(height: 4),
-                              Text(
-                                '$processed/$total - $message',
-                              ),
+                              Text('$processed/$total - $message'),
                             ],
                           ),
                           trailing: isDone
                               ? const Icon(
-                            Icons.check_circle,
-                            color: Colors.green,
-                          )
+                                  Icons.check_circle,
+                                  color: Colors.green,
+                                )
                               : IconButton(
-                            icon: const Icon(
-                              Icons.stop_circle_outlined,
-                              color: Colors.red,
-                            ),
-                            tooltip: 'Hủy task',
-                            onPressed: () async {
-                              try {
-                                await crawlService.cancelTask(
-                                  taskId.toString(),
-                                );
+                                  icon: const Icon(
+                                    Icons.stop_circle_outlined,
+                                    color: Colors.red,
+                                  ),
+                                  tooltip: 'Hủy task',
+                                  onPressed: () async {
+                                    try {
+                                      await crawlService.cancelTask(
+                                        taskId.toString(),
+                                      );
 
-                                if (!sheetContext.mounted) {
-                                  return;
-                                }
+                                      if (!sheetContext.mounted) return;
 
-                                Navigator.pop(sheetContext);
-                                _showAllTasksSheet();
-                              } catch (e) {
-                                _showSnackBar(
-                                  'Lỗi hủy task: $e',
-                                );
-                              }
-                            },
-                          ),
+                                      Navigator.pop(sheetContext);
+                                      _showAllTasksSheet();
+                                    } catch (e) {
+                                      _showSnackBar('Lỗi hủy task: $e');
+                                    }
+                                  },
+                                ),
                         );
                       },
                     ),
                   ),
                   Padding(
-                    padding: const EdgeInsets.only(
-                      bottom: 16,
-                    ),
+                    padding: const EdgeInsets.only(bottom: 16),
                     child: TextButton(
                       onPressed: () {
                         Navigator.pop(sheetContext);
@@ -441,9 +470,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
       enableDrag: false,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(20),
-        ),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (sheetContext) {
         return _ProgressSheetContent(
@@ -458,7 +485,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
               if (!sheetContext.mounted) return;
 
               Navigator.pop(sheetContext);
-
               _showSnackBar('Đã gửi yêu cầu dừng.');
             } catch (e) {
               _showSnackBar('Lỗi hủy task: $e');
@@ -484,19 +510,19 @@ class _CrawlScreenState extends State<CrawlScreen> {
   // =========================================================
 
   Widget _buildSearchResults() {
-    if (searching) {
+    if (searching || loadingWebsites) {
+      return const Expanded(child: Center(child: CircularProgressIndicator()));
+    }
+
+    if (websites.isEmpty) {
       return const Expanded(
-        child: Center(
-          child: CircularProgressIndicator(),
-        ),
+        child: Center(child: Text('Không có website được hỗ trợ')),
       );
     }
 
     if (searchResults.isEmpty) {
       return const Expanded(
-        child: Center(
-          child: Text('Nhập tên truyện để tìm kiếm'),
-        ),
+        child: Center(child: Text('Nhập tên truyện để tìm kiếm')),
       );
     }
 
@@ -504,16 +530,12 @@ class _CrawlScreenState extends State<CrawlScreen> {
       child: ListView.separated(
         padding: const EdgeInsets.all(12),
         itemCount: searchResults.length,
-        separatorBuilder: (_, __) =>
-        const SizedBox(height: 8),
+        separatorBuilder: (_, __) => const SizedBox(height: 8),
         itemBuilder: (context, index) {
           final result = searchResults[index];
 
-          final title =
-              result['title']?.toString() ?? '';
-
-          final cover =
-              result['cover']?.toString() ?? '';
+          final title = result['title']?.toString() ?? '';
+          final cover = result['cover']?.toString() ?? '';
 
           return Card(
             clipBehavior: Clip.antiAlias,
@@ -523,31 +545,26 @@ class _CrawlScreenState extends State<CrawlScreen> {
                 borderRadius: BorderRadius.circular(6),
                 child: cover.isNotEmpty
                     ? Image.network(
-                  cover,
-                  width: 60,
-                  height: 85,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) =>
-                      _searchCoverPlaceholder(),
-                )
+                        cover,
+                        width: 60,
+                        height: 85,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _searchCoverPlaceholder(),
+                      )
                     : _searchCoverPlaceholder(),
               ),
               title: Text(
                 title,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                ),
+                style: const TextStyle(fontWeight: FontWeight.w600),
               ),
-              subtitle: const Padding(
-                padding: EdgeInsets.only(top: 6),
-                child: Text('MangaRead'),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(selectedWebsite ?? 'Chưa chọn website'),
               ),
               trailing: const Icon(Icons.chevron_right),
-              onTap: loading
-                  ? null
-                  : () => selectSearchResult(result),
+              onTap: loading ? null : () => selectSearchResult(result),
             ),
           );
         },
@@ -560,10 +577,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
       width: 60,
       height: 85,
       color: Colors.grey[300],
-      child: const Icon(
-        Icons.image_not_supported,
-        color: Colors.grey,
-      ),
+      child: const Icon(Icons.image_not_supported, color: Colors.grey),
     );
   }
 
@@ -595,24 +609,52 @@ class _CrawlScreenState extends State<CrawlScreen> {
       floatingActionButton: data == null
           ? null
           : FloatingActionButton.extended(
-        onPressed: importing ? null : submit,
-        icon: importing
-            ? const SizedBox(
-          width: 18,
-          height: 18,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-          ),
-        )
-            : const Icon(Icons.cloud_download),
-        label: Text(
-          importing
-              ? 'Đang import...'
-              : 'Import (${selectedChapters.length})',
-        ),
-      ),
+              onPressed: importing ? null : submit,
+              icon: importing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.cloud_download),
+              label: Text(
+                importing
+                    ? 'Đang import...'
+                    : 'Import (${selectedChapters.length})',
+              ),
+            ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: DropdownButtonFormField<String>(
+              value: selectedWebsite,
+              isExpanded: true,
+              decoration: InputDecoration(
+                labelText: 'Website cần cào',
+                prefixIcon: const Icon(Icons.language),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              hint: const Text('Chọn website'),
+              items: websites.map((website) {
+                return DropdownMenuItem<String>(
+                  value: website,
+                  child: Text(website),
+                );
+              }).toList(),
+              onChanged: loadingWebsites || loading || importing
+                  ? null
+                  : (value) {
+                      setState(() {
+                        selectedWebsite = value;
+                        searchResults = [];
+                        data = null;
+                      });
+                    },
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.all(12),
             child: TextField(
@@ -623,19 +665,23 @@ class _CrawlScreenState extends State<CrawlScreen> {
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.search),
-                  onPressed: searching ? null : searchStories,
+                  onPressed: searching || loadingWebsites || loading
+                      ? null
+                      : searchStories,
                 ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              onSubmitted: (_) => searchStories(),
+              onSubmitted: (_) {
+                if (!searching && !loadingWebsites && !loading) {
+                  searchStories();
+                }
+              },
             ),
           ),
-          if (loading)
-            const LinearProgressIndicator(),
-          if (data == null)
-            _buildSearchResults(),
+          if (loading) const LinearProgressIndicator(),
+          if (data == null) _buildSearchResults(),
           if (data != null)
             Expanded(
               child: ListView(
@@ -670,16 +716,16 @@ class _CrawlScreenState extends State<CrawlScreen> {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: data!['cover'] != null &&
-                    data!['cover'].toString().isNotEmpty
+                child:
+                    data!['cover'] != null &&
+                        data!['cover'].toString().isNotEmpty
                     ? Image.network(
-                  data!['cover'].toString(),
-                  width: 100,
-                  height: 140,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) =>
-                      _coverPlaceholder(),
-                )
+                        data!['cover'].toString(),
+                        width: 100,
+                        height: 140,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _coverPlaceholder(),
+                      )
                     : _coverPlaceholder(),
               ),
               const SizedBox(width: 16),
@@ -697,14 +743,13 @@ class _CrawlScreenState extends State<CrawlScreen> {
                     const SizedBox(height: 8),
                     Text(
                       'Tác giả: '
-                          '${data!['author']?.toString().isNotEmpty == true ? data!['author'] : 'Ẩn danh'}',
+                      '${data!['author']?.toString().isNotEmpty == true ? data!['author'] : 'Ẩn danh'}',
                     ),
                     const SizedBox(height: 4),
+                    Text('Tổng chương: ${chapterList.length}'),
+                    Text('Đã chọn: ${selectedChapters.length}'),
                     Text(
-                      'Tổng chương: ${chapterList.length}',
-                    ),
-                    Text(
-                      'Đã chọn: ${selectedChapters.length}',
+                      'Đã crawl: ${chapterList.where((c) => _isCrawled(c as Map)).length}',
                     ),
                   ],
                 ),
@@ -723,10 +768,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
       width: 100,
       height: 140,
       color: Colors.grey[300],
-      child: const Icon(
-        Icons.image_not_supported,
-        color: Colors.grey,
-      ),
+      child: const Icon(Icons.image_not_supported, color: Colors.grey),
     );
   }
 
@@ -735,8 +777,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
   // =========================================================
 
   Widget _buildDescription() {
-    final description =
-        data!['description']?.toString() ?? '';
+    final description = data!['description']?.toString() ?? '';
 
     if (description.isEmpty) {
       return const SizedBox.shrink();
@@ -746,10 +787,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
       tilePadding: EdgeInsets.zero,
       title: const Text(
         'Mô tả truyện',
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.bold,
-        ),
+        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
       ),
       children: [
         Container(
@@ -770,8 +808,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
   // =========================================================
 
   Widget _buildInformation() {
-    final information =
-        data!['information'] as List? ?? [];
+    final information = data!['information'] as List? ?? [];
 
     if (information.isEmpty) {
       return const SizedBox.shrink();
@@ -785,28 +822,17 @@ class _CrawlScreenState extends State<CrawlScreen> {
           initiallyExpanded: true,
           title: const Text(
             'Thông tin truyện',
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(fontWeight: FontWeight.bold),
           ),
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(
-                16,
-                0,
-                16,
-                12,
-              ),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: Column(
                 children: information.map<Widget>((item) {
-                  final info =
-                  Map<String, dynamic>.from(item as Map);
+                  final info = Map<String, dynamic>.from(item as Map);
 
-                  final label =
-                      info['label']?.toString() ?? '';
-
-                  final value =
-                      info['value']?.toString() ?? '';
+                  final label = info['label']?.toString() ?? '';
+                  final value = info['value']?.toString() ?? '';
 
                   if (label.isEmpty && value.isEmpty) {
                     return const SizedBox.shrink();
@@ -832,15 +858,11 @@ class _CrawlScreenState extends State<CrawlScreen> {
             width: 105,
             child: Text(
               label,
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
           const SizedBox(width: 12),
-          Expanded(
-            child: Text(value),
-          ),
+          Expanded(child: Text(value)),
         ],
       ),
     );
@@ -862,9 +884,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
           ),
           TextButton.icon(
             onPressed: () => selectAll(false),
-            icon: const Icon(
-              Icons.check_box_outline_blank,
-            ),
+            icon: const Icon(Icons.check_box_outline_blank),
             label: const Text('Bỏ chọn'),
           ),
         ],
@@ -873,45 +893,59 @@ class _CrawlScreenState extends State<CrawlScreen> {
   }
 
   // =========================================================
-  // CHAPTER LIST - FLAT LIST, NO VOLUMES
+  // CHAPTER LIST
   // =========================================================
 
   Widget _buildChapterList(List chapterList) {
     if (chapterList.isEmpty) {
       return const Padding(
         padding: EdgeInsets.all(24),
-        child: Center(
-          child: Text('Truyện chưa có chương nào'),
-        ),
+        child: Center(child: Text('Truyện chưa có chương nào')),
       );
     }
 
     return Column(
       children: chapterList.map<Widget>((rawChapter) {
         final chapter = rawChapter as Map;
+        final title = chapter['title']?.toString() ?? '';
+        final chapterNumber = chapter['chapterNumber'];
+        final isCrawled = _isCrawled(chapter);
 
-        final title =
-            chapter['title']?.toString() ?? '';
-
-        final chapterNumber =
-        chapter['chapterNumber'];
-
-        return CheckboxListTile(
-          value: chapter['choosen'] == true,
-          onChanged: (value) {
-            toggle(chapter, value ?? false);
-          },
+        return ListTile(
+          dense: true,
+          leading: SizedBox(
+            width: 40,
+            height: 48,
+            child: Center(
+              child: isCrawled
+                  ? const Icon(
+                Icons.check_circle,
+                color: Colors.green,
+                size: 24,
+              )
+                  : Checkbox(
+                value: chapter['choosen'] == true,
+                activeColor: Colors.blue,
+                onChanged: (value) {
+                  toggle(chapter, value ?? false);
+                },
+              ),
+            ),
+          ),
           title: Text(
             title,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: isCrawled ? Colors.grey[600] : null),
           ),
           subtitle: chapterNumber == null
               ? null
               : Text('Chương $chapterNumber'),
-          dense: true,
-          controlAffinity:
-          ListTileControlAffinity.leading,
+          onTap: isCrawled
+              ? null
+              : () {
+                  toggle(chapter, chapter['choosen'] != true);
+                },
         );
       }).toList(),
     );
@@ -936,12 +970,10 @@ class _ProgressSheetContent extends StatefulWidget {
   });
 
   @override
-  State<_ProgressSheetContent> createState() =>
-      _ProgressSheetContentState();
+  State<_ProgressSheetContent> createState() => _ProgressSheetContentState();
 }
 
-class _ProgressSheetContentState
-    extends State<_ProgressSheetContent> {
+class _ProgressSheetContentState extends State<_ProgressSheetContent> {
   Timer? _timer;
 
   Map<String, dynamic>? _task;
@@ -955,11 +987,7 @@ class _ProgressSheetContentState
     super.initState();
 
     _refreshTask();
-
-    _timer = Timer.periodic(
-      const Duration(seconds: 2),
-          (_) => _refreshTask(),
-    );
+    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _refreshTask());
   }
 
   @override
@@ -972,10 +1000,7 @@ class _ProgressSheetContentState
     if (value is int) return value;
     if (value is num) return value.toInt();
 
-    return int.tryParse(
-      value?.toString() ?? '',
-    ) ??
-        0;
+    return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
   bool _isDone(String message) {
@@ -989,8 +1014,7 @@ class _ProgressSheetContentState
 
   Future<void> _refreshTask() async {
     try {
-      final allTasks =
-      await widget.crawlService.getAllTasks();
+      final allTasks = await widget.crawlService.getAllTasks();
 
       if (!mounted) return;
 
@@ -999,16 +1023,13 @@ class _ProgressSheetContentState
       setState(() {
         _task = rawTask == null
             ? null
-            : Map<String, dynamic>.from(
-          rawTask as Map,
-        );
+            : Map<String, dynamic>.from(rawTask as Map);
 
         _error = null;
         _loading = false;
       });
 
-      final message =
-          _task?['message']?.toString() ?? '';
+      final message = _task?['message']?.toString() ?? '';
 
       if (_isDone(message)) {
         _timer?.cancel();
@@ -1028,27 +1049,21 @@ class _ProgressSheetContentState
     if (_loading && _task == null) {
       return const SizedBox(
         height: 220,
-        child: Center(
-          child: CircularProgressIndicator(),
-        ),
+        child: Center(child: CircularProgressIndicator()),
       );
     }
 
     if (_error != null && _task == null) {
       return SizedBox(
         height: 220,
-        child: Center(
-          child: Text('Lỗi tải tiến độ: $_error'),
-        ),
+        child: Center(child: Text('Lỗi tải tiến độ: $_error')),
       );
     }
 
     if (_task == null) {
       return const SizedBox(
         height: 220,
-        child: Center(
-          child: Text('Không tìm thấy task'),
-        ),
+        child: Center(child: Text('Không tìm thấy task')),
       );
     }
 
@@ -1059,9 +1074,7 @@ class _ProgressSheetContentState
         ? (processed / total).clamp(0.0, 1.0)
         : 0.0;
 
-    final message =
-        _task!['message']?.toString() ?? '';
-
+    final message = _task!['message']?.toString() ?? '';
     final isDone = _isDone(message);
 
     return SafeArea(
@@ -1072,10 +1085,7 @@ class _ProgressSheetContentState
           children: [
             Text(
               _task!['title']?.toString() ?? '',
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 20),
@@ -1093,8 +1103,8 @@ class _ProgressSheetContentState
               style: TextStyle(
                 color: isDone
                     ? (message.contains('Hoàn thành')
-                    ? Colors.green
-                    : Colors.red)
+                          ? Colors.green
+                          : Colors.red)
                     : Colors.blue,
                 fontWeight: FontWeight.w500,
               ),
@@ -1108,36 +1118,29 @@ class _ProgressSheetContentState
                       onPressed: _canceling
                           ? null
                           : () async {
-                        setState(() {
-                          _canceling = true;
-                        });
+                              setState(() {
+                                _canceling = true;
+                              });
 
-                        await widget.onCancel();
+                              await widget.onCancel();
 
-                        if (mounted) {
-                          setState(() {
-                            _canceling = false;
-                          });
-                        }
-                      },
+                              if (mounted) {
+                                setState(() {
+                                  _canceling = false;
+                                });
+                              }
+                            },
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.red,
                       ),
-                      child: Text(
-                        _canceling
-                            ? 'Đang hủy...'
-                            : 'Hủy cào',
-                      ),
+                      child: Text(_canceling ? 'Đang hủy...' : 'Hủy cào'),
                     ),
                   ),
-                if (!isDone)
-                  const SizedBox(width: 12),
+                if (!isDone) const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton(
                     onPressed: widget.onClose,
-                    child: Text(
-                      isDone ? 'Xong' : 'Chạy ngầm',
-                    ),
+                    child: Text(isDone ? 'Xong' : 'Chạy ngầm'),
                   ),
                 ),
               ],

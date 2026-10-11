@@ -48,7 +48,7 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
   final Set<int> _finishedInitialImageIndexes = {};
 
   late int currentChapterId;
-  late int lastChapterNumber;
+  late double lastChapterNumber;
   late String lastStoryTitle;
   late String coverUrl;
   late int index;
@@ -84,8 +84,8 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
       }).toList();
 
       filtered.sort(
-            (a, b) => (a["chapterNumber"] as int)
-            .compareTo(b["chapterNumber"] as int),
+            (a, b) => (a["chapterNumber"] as double)
+            .compareTo(b["chapterNumber"] as double),
       );
 
       if (!mounted) return;
