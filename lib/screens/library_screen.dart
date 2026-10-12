@@ -48,42 +48,60 @@ class _LibraryPageState extends State<LibraryPage> with RouteAware {
   }
 
   Future<void> _loadLibrary() async {
-    final prefs = await SharedPreferences.getInstance();
-    final storedUser = prefs.getString("user");
-
-    if (storedUser == null) {
-      setState(() {
-        userId = null;
-        loading = false;
-      });
-      return;
-    }
-
-    final User user = User.fromJson(jsonDecode(storedUser));
-    userId = user.id;
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final storedUser = prefs.getString("user");
+
+      if (storedUser == null) {
+        if (!mounted) return;
+
+        setState(() {
+          userId = null;
+          library = [];
+          loading = false;
+        });
+        return;
+      }
+
+      final User user = User.fromJson(jsonDecode(storedUser));
+      final int currentUserId = user.id;
+
       final List<int> data = List<int>.from(
-        await Bookmark().getBookmark(userId!),
+        await Bookmark().getBookmark(currentUserId),
       );
-      List<Story>? list = [];
-      for (int c in data) {
-        final Map<String, dynamic> marked = await StoryFetcher().searchLittle(
-          c,
-        );
+
+      final List<Story> list = [];
+
+      for (final int id in data) {
+        final Map<String, dynamic> marked =
+        await StoryFetcher().searchLittle(id);
+
         list.add(Story.fromJson(marked));
       }
+
+      if (!mounted) return;
+
       setState(() {
+        userId = currentUserId;
         library = list;
         loading = false;
       });
     } catch (e) {
+      debugPrint('Lỗi tải thư viện: $e');
+
+      if (!mounted) return;
+
       setState(() {
         library = [];
         loading = false;
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Lỗi tải thư viện: $e")));
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Không thể tải thư viện. Vui lòng thử lại.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
     }
   }
 
