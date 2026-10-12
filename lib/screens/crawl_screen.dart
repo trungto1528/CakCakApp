@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../config/api_config.dart';
 import '../services/crawl_service.dart';
 
 class CrawlScreen extends StatefulWidget {
@@ -24,8 +25,11 @@ class _CrawlScreenState extends State<CrawlScreen> {
   List<String> websites = [];
   String? selectedWebsite;
 
-  // URL truyện hiện tại, dùng để xác định Referer ảnh bìa.
   String? _currentStoryUrl;
+
+  // Chọn truyện để gộp nguồn.
+  int? _selectedStoryId;
+  bool _createNewStory = true;
 
   bool loading = false;
   bool searching = false;
@@ -57,6 +61,11 @@ class _CrawlScreenState extends State<CrawlScreen> {
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
+  double _asDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
   bool _isCrawled(Map chapter) {
     return chapter['crawled'] == true ||
         chapter['crawled']?.toString().toLowerCase() == 'true';
@@ -76,21 +85,23 @@ class _CrawlScreenState extends State<CrawlScreen> {
   }
 
   List<Map<String, dynamic>> get selectedChapters {
-    return chapters
-        .where((chapter) {
+    return chapters.where((chapter) {
       final map = chapter as Map;
       return !_isCrawled(map) && map['choosen'] == true;
-    })
-        .map<Map<String, dynamic>>(
-          (chapter) => Map<String, dynamic>.from(chapter as Map),
-    )
+    }).map<Map<String, dynamic>>((chapter) {
+      return Map<String, dynamic>.from(chapter as Map);
+    }).toList();
+  }
+
+  List<Map<String, dynamic>> get similarStories {
+    final raw = data?['similarStories'] as List? ?? [];
+
+    return raw
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
         .toList();
   }
 
-  /// Lấy domain gốc từ URL website đang cào.
-  /// Ví dụ:
-  /// https://www.mangahere.cc/manga/example/
-  /// -> https://www.mangahere.cc/
   String _getWebsiteReferer(String? url) {
     if (url == null || url.trim().isEmpty) {
       return 'https://www.mangahere.cc/';
@@ -107,7 +118,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
     return '${uri.scheme}://${uri.authority}/';
   }
 
-  /// Header dùng khi Flutter tải ảnh bìa trực tiếp.
   Map<String, String> _imageHeaders(String? storyUrl) {
     return {
       'Referer': _getWebsiteReferer(storyUrl),
@@ -122,6 +132,12 @@ class _CrawlScreenState extends State<CrawlScreen> {
     return result['url']?.toString().trim() ??
         result['storyUrl']?.toString().trim() ??
         '';
+  }
+
+  int? _readStoryId(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '');
   }
 
   // =========================================================
@@ -139,7 +155,10 @@ class _CrawlScreenState extends State<CrawlScreen> {
       if (!mounted) return;
 
       setState(() {
-        websites = results.where((name) => name.isNotEmpty).toSet().toList();
+        websites = results
+            .where((name) => name.isNotEmpty)
+            .toSet()
+            .toList();
 
         if (!websites.contains(selectedWebsite)) {
           selectedWebsite = websites.isNotEmpty ? websites.first : null;
@@ -188,6 +207,8 @@ class _CrawlScreenState extends State<CrawlScreen> {
       searchResults = [];
       data = null;
       _currentStoryUrl = null;
+      _selectedStoryId = null;
+      _createNewStory = true;
     });
 
     try {
@@ -234,6 +255,8 @@ class _CrawlScreenState extends State<CrawlScreen> {
       loading = true;
       data = null;
       _currentStoryUrl = url;
+      _selectedStoryId = null;
+      _createNewStory = true;
     });
 
     try {
@@ -244,12 +267,10 @@ class _CrawlScreenState extends State<CrawlScreen> {
       final normalizedData = Map<String, dynamic>.from(resultData);
       final rawChapters = normalizedData['chapters'] as List? ?? [];
 
-      // Giữ URL truyện để tạo Referer cho ảnh bìa.
       normalizedData['url'] ??= url;
 
       normalizedData['chapters'] = rawChapters.map((rawChapter) {
         final chapter = Map<String, dynamic>.from(rawChapter as Map);
-
         final isCrawled = _isCrawled(chapter);
 
         chapter['crawled'] = isCrawled;
@@ -258,8 +279,15 @@ class _CrawlScreenState extends State<CrawlScreen> {
         return chapter;
       }).toList();
 
+      // Nếu backend đã trả selectedStoryId thì đọc giá trị đó.
+      // Mặc định vẫn là tạo truyện mới để tránh gộp nhầm.
+      final initialStoryId =
+      _readStoryId(normalizedData['selectedStoryId']);
+
       setState(() {
         data = normalizedData;
+        _selectedStoryId = initialStoryId;
+        _createNewStory = initialStoryId == null;
       });
     } catch (e) {
       if (!mounted) return;
@@ -274,6 +302,38 @@ class _CrawlScreenState extends State<CrawlScreen> {
   }
 
   // =========================================================
+  // STORY MATCHING SELECTION
+  // =========================================================
+
+  void _chooseCreateNewStory() {
+    setState(() {
+      _createNewStory = true;
+      _selectedStoryId = null;
+      if (data != null) {
+        data!['selectedStoryId'] = null;
+      }
+    });
+  }
+
+  void _chooseExistingStory(Map<String, dynamic> story) {
+    final storyId = _readStoryId(story['storyId']);
+
+    if (storyId == null) {
+      _showSnackBar('Truyện tương tự không có storyId hợp lệ');
+      return;
+    }
+
+    setState(() {
+      _createNewStory = false;
+      _selectedStoryId = storyId;
+
+      if (data != null) {
+        data!['selectedStoryId'] = storyId;
+      }
+    });
+  }
+
+  // =========================================================
   // BACK TO SEARCH
   // =========================================================
 
@@ -282,6 +342,8 @@ class _CrawlScreenState extends State<CrawlScreen> {
       data = null;
       searchResults = [];
       _currentStoryUrl = null;
+      _selectedStoryId = null;
+      _createNewStory = true;
     });
   }
 
@@ -323,6 +385,11 @@ class _CrawlScreenState extends State<CrawlScreen> {
       return;
     }
 
+    if (!_createNewStory && _selectedStoryId == null) {
+      _showSnackBar('Vui lòng chọn truyện cần gộp hoặc tạo truyện mới');
+      return;
+    }
+
     if (importing) return;
 
     setState(() {
@@ -333,6 +400,11 @@ class _CrawlScreenState extends State<CrawlScreen> {
       final payload = Map<String, dynamic>.from(data!);
 
       payload['chapters'] = selectedChapters;
+
+      // Chọn truyện hiện có: gửi ID.
+      // Tạo truyện mới: gửi null.
+      payload['selectedStoryId'] =
+      _createNewStory ? null : _selectedStoryId;
 
       final res = await crawlService.importStory(payload, widget.userId);
 
@@ -366,9 +438,9 @@ class _CrawlScreenState extends State<CrawlScreen> {
   void _showSnackBar(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   // =========================================================
@@ -399,7 +471,9 @@ class _CrawlScreenState extends State<CrawlScreen> {
               final tasks = snapshot.data ?? {};
 
               if (tasks.isEmpty) {
-                return const Center(child: Text('Không có tiến trình nào'));
+                return const Center(
+                  child: Text('Không có tiến trình nào'),
+                );
               }
 
               return Column(
@@ -622,7 +696,10 @@ class _CrawlScreenState extends State<CrawlScreen> {
       width: 60,
       height: 85,
       color: Colors.grey[300],
-      child: const Icon(Icons.image_not_supported, color: Colors.grey),
+      child: const Icon(
+        Icons.image_not_supported,
+        color: Colors.grey,
+      ),
     );
   }
 
@@ -697,6 +774,8 @@ class _CrawlScreenState extends State<CrawlScreen> {
                   searchResults = [];
                   data = null;
                   _currentStoryUrl = null;
+                  _selectedStoryId = null;
+                  _createNewStory = true;
                 });
               },
             ),
@@ -731,9 +810,10 @@ class _CrawlScreenState extends State<CrawlScreen> {
           if (data != null)
             Expanded(
               child: ListView(
-                padding: const EdgeInsets.only(bottom: 80),
+                padding: const EdgeInsets.only(bottom: 90),
                 children: [
                   _buildStoryHeader(),
+                  _buildSimilarStories(),
                   _buildInformation(),
                   _buildActionButtons(),
                   _buildChapterList(chapterList),
@@ -800,7 +880,8 @@ class _CrawlScreenState extends State<CrawlScreen> {
                     Text('Tổng chương: ${chapterList.length}'),
                     Text('Đã chọn: ${selectedChapters.length}'),
                     Text(
-                      'Đã crawl: ${chapterList.where((c) => _isCrawled(c as Map)).length}',
+                      'Đã crawl: '
+                          '${chapterList.where((c) => _isCrawled(c as Map)).length}',
                     ),
                   ],
                 ),
@@ -819,7 +900,219 @@ class _CrawlScreenState extends State<CrawlScreen> {
       width: 100,
       height: 140,
       color: Colors.grey[300],
-      child: const Icon(Icons.image_not_supported, color: Colors.grey),
+      child: const Icon(
+        Icons.image_not_supported,
+        color: Colors.grey,
+      ),
+    );
+  }
+
+  // =========================================================
+  // SIMILAR STORIES / MERGE SOURCE
+  // =========================================================
+
+  Widget _buildSimilarStories() {
+    final matches = similarStories;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.library_books_outlined),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Truyện đã có trong hệ thống?',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Chọn truyện đúng để gộp nguồn. Nếu không chắc chắn, '
+                    'hãy tạo truyện mới.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[700],
+                ),
+              ),
+              const Divider(height: 20),
+
+              // Tạo truyện mới.
+              RadioListTile<bool>(
+                contentPadding: EdgeInsets.zero,
+                value: true,
+                groupValue: _createNewStory,
+                onChanged: importing
+                    ? null
+                    : (_) => _chooseCreateNewStory(),
+                title: const Text(
+                  'Tạo truyện mới',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                subtitle: const Text(
+                  'Không gộp với bất kỳ truyện nào đang có.',
+                ),
+                secondary: const Icon(Icons.add_circle_outline),
+              ),
+
+              if (matches.isEmpty) ...[
+                const SizedBox(height: 4),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'Backend không trả về truyện tương tự. '
+                        'Bạn có thể tiếp tục tạo truyện mới.',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ),
+              ] else ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Các truyện có khả năng trùng (${matches.length})',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                ...matches.map(_buildSimilarStoryTile),
+              ],
+
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: !_createNewStory
+                        ? Colors.blue.withValues(alpha: 0.5)
+                        : Colors.grey.withValues(alpha: 0.3),
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      _createNewStory
+                          ? Icons.add_circle_outline
+                          : Icons.link,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _createNewStory
+                            ? 'Lựa chọn hiện tại: tạo truyện mới.'
+                            : 'Lựa chọn hiện tại: gộp nguồn vào truyện ID '
+                            '$_selectedStoryId.',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSimilarStoryTile(Map<String, dynamic> story) {
+    final storyId = _readStoryId(story['storyId']);
+    final title = story['title']?.toString() ?? 'Không có tiêu đề';
+    final author = story['author']?.toString() ?? '';
+    final cover = story['coverUrl']?.toString() ?? '';
+    final similarity = _asDouble(story['similarity']);
+
+    final isSelected =
+        !_createNewStory &&
+            storyId != null &&
+            storyId == _selectedStoryId;
+
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 8),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(
+          color: isSelected ? Colors.blue : Colors.grey.withValues(alpha: 0.3),
+          width: isSelected ? 1.5 : 1,
+        ),
+      ),
+      child: RadioListTile<int>(
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 8,
+          vertical: 4,
+        ),
+        value: storyId ?? -1,
+        groupValue: _createNewStory ? null : _selectedStoryId,
+        onChanged: importing || storyId == null
+            ? null
+            : (_) => _chooseExistingStory(story),
+        title: Text(
+          title,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (author.isNotEmpty) ...[
+              const SizedBox(height: 3),
+              Text(
+                'Tác giả: $author',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+            const SizedBox(height: 3),
+            Text('ID truyện: ${storyId ?? 'Không hợp lệ'}'),
+            if (story['similarity'] != null)
+              Text('Độ tương đồng: ${(similarity * 100).toStringAsFixed(1)}%'),
+          ],
+        ),
+        secondary: ClipRRect(
+          borderRadius: BorderRadius.circular(5),
+          child: cover.isNotEmpty
+              ? Image.network(
+            '${ApiConfig.coverImage}/$cover',
+            width: 48,
+            height: 68,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => _similarCoverPlaceholder(),
+          )
+              : _similarCoverPlaceholder(),
+        ),
+      ),
+    );
+  }
+
+  Widget _similarCoverPlaceholder() {
+    return Container(
+      width: 48,
+      height: 68,
+      color: Colors.grey[300],
+      child: const Icon(
+        Icons.image_not_supported,
+        color: Colors.grey,
+        size: 20,
+      ),
     );
   }
 
@@ -870,7 +1163,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
       child: Card(
         elevation: 0,
         child: ExpansionTile(
-          initiallyExpanded: true,
+          initiallyExpanded: false,
           title: const Text(
             'Thông tin truyện',
             style: TextStyle(fontWeight: FontWeight.bold),
@@ -987,7 +1280,9 @@ class _CrawlScreenState extends State<CrawlScreen> {
             title,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: isCrawled ? Colors.grey[600] : null),
+            style: TextStyle(
+              color: isCrawled ? Colors.grey[600] : null,
+            ),
           ),
           subtitle: chapterNumber == null
               ? null

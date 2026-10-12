@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/api_config.dart';
 import '../models/User.dart';
 import '../models/app_theme_mode.dart';
+import '../services/auth.dart';
 import '../services/ota.dart';
 import 'admin_management.dart';
 import 'change_password.dart';
@@ -43,19 +44,44 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _loadUser() async {
-    final prefs = await SharedPreferences.getInstance();
-    final userStr = prefs.getString("user");
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userStr = prefs.getString('user');
 
-    if (userStr != null) {
+      if (userStr == null) {
+        if (!mounted) return;
+        setState(() => user = null);
+        return;
+      }
+
+      // Lấy ID từ thông tin user đã lưu.
+      final savedUser = User.fromJson(jsonDecode(userStr));
+
+      // Gọi API lấy thông tin mới nhất.
+      final response = await Auth().fetchUser(savedUser.id);
+
+      // Giải mã JSON từ backend.
+      final Map<String, dynamic> userJson = jsonDecode(response);
+
+      // Chuyển thành đối tượng User.
+      final fetchedUser = User.fromJson(userJson);
+
+      if (!mounted) return;
+
       setState(() {
-        user = User.fromJson(jsonDecode(userStr));
+        user = fetchedUser;
       });
+
+      // Lưu thông tin mới nhất.
+      await prefs.setString('user', jsonEncode(userJson));
+    } catch (e) {
+      debugPrint('Lỗi tải thông tin user: $e');
     }
   }
 
   Color _getRoleColor(String role) {
     switch (role.toUpperCase()) {
-      case "ADMIN":
+      case 'ADMIN':
         return Colors.green;
       default:
         return Colors.blueGrey;
@@ -64,8 +90,13 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove("user");
-    setState(() => user = null);
+    await prefs.remove('user');
+
+    if (!mounted) return;
+
+    setState(() {
+      user = null;
+    });
   }
 
   Future<void> _goLogin() async {
@@ -89,29 +120,28 @@ class _ProfilePageState extends State<ProfilePage> {
             children: [
               const SizedBox(height: 12),
               const Text(
-                "Cài đặt",
+                'Cài đặt',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
 
-              //  DARK / LIGHT MODE
               ListTile(
                 leading: const Icon(Icons.dark_mode),
-                title: const Text("Giao diện"),
+                title: const Text('Giao diện'),
                 trailing: DropdownButton<AppThemeMode>(
                   value: widget.currentMode,
                   underline: const SizedBox(),
                   items: const [
                     DropdownMenuItem(
                       value: AppThemeMode.light,
-                      child: Text("Sáng"),
+                      child: Text('Sáng'),
                     ),
                     DropdownMenuItem(
                       value: AppThemeMode.dark,
-                      child: Text("Tối"),
+                      child: Text('Tối'),
                     ),
                     DropdownMenuItem(
                       value: AppThemeMode.system,
-                      child: Text("Hệ thống"),
+                      child: Text('Hệ thống'),
                     ),
                   ],
                   onChanged: (mode) {
@@ -122,24 +152,28 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
               ),
 
-              //  ĐỔI MẬT KHẨU
               ListTile(
                 leading: const Icon(Icons.lock),
-                title: const Text("Đổi mật khẩu"),
+                title: const Text('Đổi mật khẩu'),
                 onTap: () {
+                  final currentUser = user;
                   Navigator.pop(context);
+
+                  if (currentUser == null) return;
+
                   Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (_) =>
-                          ChangePasswordScreen(username: user!.username),
+                          ChangePasswordScreen(username: currentUser.username),
                     ),
                   );
                 },
               ),
+
               ListTile(
                 leading: const Icon(Icons.system_update),
-                title: const Text("Kiểm tra cập nhật"),
+                title: const Text('Kiểm tra cập nhật'),
                 onTap: () {
                   Navigator.pop(context);
                   OtaService().checkAndUpdate(context);
@@ -153,98 +187,121 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _changeAvatar() async {
+    final currentUser = user;
+    if (currentUser == null) return;
+
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: ImageSource.gallery);
 
-    if (picked == null) return;
+    if (picked == null || !mounted) return;
 
     final file = File(picked.path);
 
     try {
-      var request = http.MultipartRequest(
-        "POST",
-        Uri.parse("${ApiConfig.api}/users/upload-avatar"),
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${ApiConfig.api}/users/upload-avatar'),
       );
 
-      request.files.add(await http.MultipartFile.fromPath("file", file.path));
+      request.files.add(await http.MultipartFile.fromPath('file', file.path));
 
-      request.fields["username"] = user!.username;
+      request.fields['username'] = currentUser.username;
 
-      var response = await request.send();
+      final response = await request.send();
 
       if (response.statusCode == 200) {
         final fileName = await response.stream.bytesToString();
 
-        setState(() {
-          user!.avatarUrl = "/$fileName";
-        });
+        currentUser.avatarUrl = '/$fileName';
 
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString("user", jsonEncode(user));
+        await prefs.setString('user', jsonEncode(currentUser.toJson()));
+
+        if (!mounted) return;
+
+        setState(() {
+          user = currentUser;
+        });
 
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Cập nhật avatar thành công")),
+          const SnackBar(content: Text('Cập nhật avatar thành công')),
         );
       } else {
-        throw Exception("Upload failed");
+        throw Exception('Upload failed: ${response.statusCode}');
       }
     } catch (e) {
+      if (!mounted) return;
+
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text("Lỗi upload avatar")));
+      ).showSnackBar(const SnackBar(content: Text('Lỗi upload avatar')));
     }
   }
 
   Future<void> _changeName() async {
-    final controller = TextEditingController(text: user!.displayName);
+    final currentUser = user;
+    if (currentUser == null) return;
+
+    final controller = TextEditingController(text: currentUser.displayName);
 
     final newName = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Đổi tên"),
-        content: TextField(controller: controller),
+        title: const Text('Đổi tên'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Tên hiển thị'),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text("Hủy"),
+            child: const Text('Hủy'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text("Lưu"),
+            onPressed: () {
+              Navigator.pop(context, controller.text);
+            },
+            child: const Text('Lưu'),
           ),
         ],
       ),
     );
 
+    controller.dispose();
+
     if (newName == null || newName.trim().isEmpty) return;
 
     try {
       final res = await http.post(
-        Uri.parse(
-          "${ApiConfig.api}/users/${user!.id}/displayName",
-        ),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"displayName": newName}),
+        Uri.parse('${ApiConfig.api}/users/${currentUser.id}/displayName'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'displayName': newName.trim()}),
       );
 
       if (res.statusCode == 200) {
-        setState(() {
-          user!.displayName = newName;
-        });
+        currentUser.displayName = newName.trim();
 
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString("user", jsonEncode(user));
+        await prefs.setString('user', jsonEncode(currentUser.toJson()));
+
+        if (!mounted) return;
+
+        setState(() {
+          user = currentUser;
+        });
 
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text("Đổi tên thành công")));
+        ).showSnackBar(const SnackBar(content: Text('Đổi tên thành công')));
       } else {
         throw Exception(res.body);
       }
     } catch (e) {
+      if (!mounted) return;
+
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+      ).showSnackBar(SnackBar(content: Text('Lỗi: $e')));
     }
   }
 
@@ -259,13 +316,15 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Widget _buildHeader() {
+    final currentUser = user!;
+
     return Row(
       children: [
         GestureDetector(
           onTap: _changeAvatar,
           child: ClipOval(
             child: CachedNetworkImage(
-              imageUrl: "${ApiConfig.avatarImage}/${user!.avatarUrl}",
+              imageUrl: '${ApiConfig.avatarImage}/${currentUser.avatarUrl}',
               width: 72,
               height: 72,
               fit: BoxFit.cover,
@@ -279,17 +338,15 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         ),
         const SizedBox(width: 16),
-
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                mainAxisSize: MainAxisSize.min,
                 children: [
                   Flexible(
                     child: Text(
-                      user!.displayName,
+                      currentUser.displayName,
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -308,11 +365,12 @@ class _ProfilePageState extends State<ProfilePage> {
                 children: [
                   Flexible(
                     child: Text(
-                      "@${user!.username}",
+                      '@${currentUser.username}',
                       style: TextStyle(
                         fontSize: 13,
                         color: Colors.grey.shade600,
                       ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -322,11 +380,11 @@ class _ProfilePageState extends State<ProfilePage> {
                       vertical: 2,
                     ),
                     decoration: BoxDecoration(
-                      color: _getRoleColor(user!.role),
+                      color: _getRoleColor(currentUser.role),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
-                      user!.role,
+                      currentUser.role,
                       style: const TextStyle(
                         fontSize: 11,
                         color: Colors.white,
@@ -339,8 +397,6 @@ class _ProfilePageState extends State<ProfilePage> {
             ],
           ),
         ),
-
-        // Nút logout
         IconButton(
           icon: const Icon(Icons.logout, color: Colors.red),
           onPressed: logout,
@@ -349,13 +405,13 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  bool get isAdmin => user?.role.toUpperCase() == "ADMIN";
+  bool get isAdmin => user?.role.toUpperCase() == 'ADMIN';
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Tài khoản"),
+        title: const Text('Tài khoản'),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
@@ -373,22 +429,21 @@ class _ProfilePageState extends State<ProfilePage> {
             Center(
               child: ElevatedButton(
                 onPressed: _goLogin,
-                child: const Text("Đăng nhập"),
+                child: const Text('Đăng nhập'),
               ),
             ),
           ] else ...[
             _buildHeader(),
             const SizedBox(height: 20),
 
-            // ================= COMMON =================
-            _tile(Icons.add_box, "Đăng nội dung", () {
+            _tile(Icons.add_box, 'Đăng nội dung', () {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const StoryChapterScreen()),
               );
             }),
 
-            _tile(Icons.menu_book, "Truyện của tôi", () {
+            _tile(Icons.menu_book, 'Truyện của tôi', () {
               Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -397,40 +452,32 @@ class _ProfilePageState extends State<ProfilePage> {
               );
             }),
 
-            // ================= ADMIN ONLY =================
-            // ================= ADMIN ONLY =================
             if (isAdmin)
-              _tile(Icons.admin_panel_settings, "Quản lý tất cả truyện", () {
+              _tile(Icons.admin_panel_settings, 'Quản lý tất cả truyện', () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => AdminStoryManagerScreen(
-                      adminId: user!.id,
-                    ),
+                    builder: (_) => AdminStoryManagerScreen(adminId: user!.id),
                   ),
                 );
               }),
 
             if (isAdmin)
-              _tile(Icons.people, "Quản lý người dùng", () {
+              _tile(Icons.people, 'Quản lý người dùng', () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => AdminUserManagerScreen(
-                      adminId: user!.id,
-                    ),
+                    builder: (_) => AdminUserManagerScreen(adminId: user!.id),
                   ),
                 );
               }),
 
             if (isAdmin)
-              _tile(Icons.cloud_download, "Nhập truyện từ URL (Crawl)", () {
+              _tile(Icons.cloud_download, 'Nhập truyện từ URL (Crawl)', () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => CrawlScreen(
-                      userId: user!.id,
-                    ),
+                    builder: (_) => CrawlScreen(userId: user!.id),
                   ),
                 );
               }),

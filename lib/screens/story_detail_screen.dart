@@ -602,9 +602,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                 ],
               );
             }),
-
             _buildPagination(),
-
             const SizedBox(height: 20),
           ],
         ),
