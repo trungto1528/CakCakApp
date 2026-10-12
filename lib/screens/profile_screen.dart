@@ -473,7 +473,7 @@ class _ProfilePageState extends State<ProfilePage> {
               }),
 
             if (isAdmin)
-              _tile(Icons.cloud_download, 'Nhập truyện từ URL (Crawl)', () {
+              _tile(Icons.cloud_download, 'Cào pay web', () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(

@@ -1,8 +1,12 @@
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:novel_app/route_observer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'screens/main_screen.dart';
+
 import 'models/app_theme_mode.dart';
+import 'screens/main_screen.dart';
+import 'platforms/windows/windows_main_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -10,20 +14,28 @@ void main() async {
   final prefs = await SharedPreferences.getInstance();
   final index = prefs.getInt('themeMode') ?? 2;
 
-  runApp(MyApp(initialMode: AppThemeMode.values[index]));
+  final safeIndex =
+  index >= 0 && index < AppThemeMode.values.length ? index : 2;
+
+  runApp(
+    MyApp(initialMode: AppThemeMode.values[safeIndex]),
+  );
 }
 
 class MyApp extends StatefulWidget {
   final AppThemeMode initialMode;
 
-  const MyApp({super.key, required this.initialMode});
+  const MyApp({
+    super.key,
+    required this.initialMode,
+  });
 
   @override
   State<MyApp> createState() => _MyAppState();
 }
 
 class _MyAppState extends State<MyApp> {
-  AppThemeMode _themeMode = AppThemeMode.system;
+  late AppThemeMode _themeMode;
 
   @override
   void initState() {
@@ -40,6 +52,7 @@ class _MyAppState extends State<MyApp> {
     setState(() {
       _themeMode = mode;
     });
+
     _saveTheme(mode);
   }
 
@@ -54,6 +67,20 @@ class _MyAppState extends State<MyApp> {
     }
   }
 
+  Widget _buildPlatformHome() {
+    if (defaultTargetPlatform == TargetPlatform.windows) {
+      return WindowsMainScreen(
+        currentMode: _themeMode,
+        onThemeChanged: _changeTheme,
+      );
+    }
+
+    return MainScreen(
+      currentMode: _themeMode,
+      onThemeChanged: _changeTheme,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -61,49 +88,36 @@ class _MyAppState extends State<MyApp> {
       debugShowCheckedModeBanner: false,
       themeMode: _flutterThemeMode,
 
-      // TÔNG SÁNG: Xám nhạt & Xanh Blue
       theme: ThemeData(
         useMaterial3: true,
         colorSchemeSeed: Colors.blue,
         brightness: Brightness.light,
-        scaffoldBackgroundColor: const Color(0xFFF5F5F5), // Nền xám cực nhẹ
+        scaffoldBackgroundColor: const Color(0xFFF5F5F5),
       ),
 
-      // TÔNG TỐI: Sửa từ Đen sang Xám Đậm (Charcoal)
       darkTheme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
-
-        // Nền chính xám tối (Dark Grey) giúp giảm hiện tượng nhòe màn hình
         scaffoldBackgroundColor: const Color(0xFF121212),
-
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFF121212),
           elevation: 0,
           surfaceTintColor: Colors.transparent,
         ),
-
-        // Màu của các khung (Card/Container) xám nhẹ hơn nền để tạo khối
         cardColor: const Color(0xFF1E1E1E),
-
         colorScheme: const ColorScheme.dark(
-          primary: Colors.blueAccent,    // Màu nhấn cho các nút
-          surface: Color(0xFF1E1E1E),    // Màu các thành phần bề mặt
-          onSurface: Colors.white70,     // Màu chữ trên bề mặt
+          primary: Colors.blueAccent,
+          surface: Color(0xFF1E1E1E),
+          onSurface: Colors.white70,
           secondary: Colors.grey,
         ),
-
-        // Tùy chỉnh text để không bị quá sáng (đỡ mỏi mắt)
         textTheme: const TextTheme(
           bodyLarge: TextStyle(color: Color(0xFFE0E0E0)),
           bodyMedium: TextStyle(color: Color(0xFFBDBDBD)),
         ),
       ),
 
-      home: MainScreen(
-        currentMode: _themeMode,
-        onThemeChanged: _changeTheme,
-      ),
+      home: _buildPlatformHome(),
     );
   }
 }
