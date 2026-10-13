@@ -88,6 +88,38 @@ class CrawlService {
     return Map<String, dynamic>.from(jsonDecode(res.body));
   }
 
+  Map<String, dynamic> buildNewChaptersPayload(Map<String, dynamic> result) {
+    final chapters = (result['chapters'] as List? ?? [])
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .map(
+          (chapter) => <String, dynamic>{
+            'title': chapter['title'],
+            'url': chapter['url'],
+            'order': chapter['order'],
+            'choosen': true,
+          },
+        )
+        .toList();
+
+    if (chapters.isEmpty) {
+      throw Exception('Truyện không có chapter mới');
+    }
+
+    return {
+      'title': result['storyTitle'],
+      'sourceUrl': result['sourceUrl'],
+      'selectedStoryId': result['storyId'],
+      'chapters': chapters,
+    };
+  }
+
+  Future<Map<String, dynamic>> crawlNewChapters(
+    Map<String, dynamic> result,
+    int userId,
+  ) async {
+    return importStory(buildNewChaptersPayload(result), userId);
+  }
+
   Future<List<Map<String, dynamic>>> searchStories(
     String website,
     String keyword,

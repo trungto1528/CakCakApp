@@ -28,13 +28,9 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
   bool isCheckingAll = false;
   bool isLoadingTasks = false;
 
-  // Danh sách task kiểm tra cập nhật được lấy từ backend.
   List<Map<String, dynamic>> updateTasks = [];
 
-  // Timer chỉ dùng để làm mới tiến độ khi màn hình đang mở.
   Timer? _taskRefreshTimer;
-
-  String get _crawlerUrl => ApiConfig.crawlerUrl;
 
   @override
   void initState() {
@@ -44,7 +40,7 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
 
     _taskRefreshTimer = Timer.periodic(
       const Duration(seconds: 3),
-      (_) => _refreshRunningTasks(),
+          (_) => _refreshRunningTasks(),
     );
   }
 
@@ -66,11 +62,9 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
         if (a['status'] == 'PENDING' && b['status'] != 'PENDING') {
           return -1;
         }
-
         if (a['status'] != 'PENDING' && b['status'] == 'PENDING') {
           return 1;
         }
-
         return 0;
       });
 
@@ -83,10 +77,7 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
     } catch (e) {
       if (!mounted) return;
 
-      setState(() {
-        isLoading = false;
-      });
-
+      setState(() => isLoading = false);
       _showMessage('Không thể tải danh sách truyện: $e');
     }
   }
@@ -106,20 +97,16 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
         if (a['status'] == 'PENDING' && b['status'] != 'PENDING') {
           return -1;
         }
-
         if (a['status'] != 'PENDING' && b['status'] == 'PENDING') {
           return 1;
         }
 
         final aNumber = double.tryParse('${a['chapterNumber']}') ?? 0;
         final bNumber = double.tryParse('${b['chapterNumber']}') ?? 0;
-
         return aNumber.compareTo(bNumber);
       });
 
-      setState(() {
-        storyChapters[storyId] = chapters;
-      });
+      setState(() => storyChapters[storyId] = chapters);
     } catch (e) {
       debugPrint('Không thể tải chapter của truyện $storyId: $e');
     }
@@ -129,12 +116,10 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
   // UPDATE CHECK API
   // ============================================================
 
-  /// Kiểm tra cập nhật cho một truyện.
   Future<void> _checkStoryUpdates(int storyId) async {
     try {
       final response = await CrawlService().checkStoryUpdates(storyId);
-      final task = Map<String, dynamic>.from(response);
-      final taskId = task['taskId']?.toString();
+      final taskId = response['taskId']?.toString();
 
       if (taskId == null || taskId.isEmpty) {
         throw Exception('Backend không trả về taskId');
@@ -144,8 +129,7 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
 
       if (!mounted) return;
 
-      _showMessage('Đã bắt đầu kiểm tra truyện #$storyId. Task: $taskId');
-
+      _showMessage('Đã bắt đầu kiểm tra truyện #$storyId.');
       _showTaskDetails(taskId);
     } catch (e) {
       if (!mounted) return;
@@ -153,19 +137,14 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
     }
   }
 
-  /// Kiểm tra cập nhật tất cả truyện.
   Future<void> _checkAllUpdates() async {
     if (isCheckingAll) return;
 
-    setState(() {
-      isCheckingAll = true;
-    });
+    setState(() => isCheckingAll = true);
 
     try {
       final response = await CrawlService().checkAllStoryUpdates();
-
-      final task = Map<String, dynamic>.from(response);
-      final taskId = task['taskId']?.toString();
+      final taskId = response['taskId']?.toString();
 
       if (taskId == null || taskId.isEmpty) {
         throw Exception('Backend không trả về taskId');
@@ -182,17 +161,11 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
       _showMessage('Không thể kiểm tra tất cả truyện: $e');
     } finally {
       if (mounted) {
-        setState(() {
-          isCheckingAll = false;
-        });
+        setState(() => isCheckingAll = false);
       }
     }
   }
 
-  /// Tải danh sách task từ backend.
-  ///
-  /// Endpoint này cần được bổ sung trong CrawlController:
-  /// GET /api/crawler/check-updates/tasks
   Future<void> _loadUpdateTasks() async {
     if (isLoadingTasks) return;
 
@@ -201,7 +174,6 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
     try {
       final response = await CrawlService().getUpdateCheckTasks();
 
-      // Task mới nhất lên trước nếu backend trả về createdAt.
       response.sort((a, b) {
         final aTime = DateTime.tryParse('${a['createdAt'] ?? ''}');
         final bTime = DateTime.tryParse('${b['createdAt'] ?? ''}');
@@ -212,9 +184,7 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
 
       if (!mounted) return;
 
-      setState(() {
-        updateTasks = response;
-      });
+      setState(() => updateTasks = response);
     } catch (e) {
       debugPrint('Không thể tải danh sách task: $e');
     } finally {
@@ -222,12 +192,11 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
     }
   }
 
-  /// Làm mới các task đang chạy.
   Future<void> _refreshRunningTasks() async {
     if (!mounted || isLoadingTasks) return;
 
     final hasRunningTask = updateTasks.any(
-      (task) => _isRunning(task['status']),
+          (task) => _isRunning(task['status']),
     );
 
     if (hasRunningTask) {
@@ -235,42 +204,34 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
     }
   }
 
-  /// Lấy trạng thái chi tiết của một task.
   Future<Map<String, dynamic>> _getTaskDetails(String taskId) async {
-    final response = await CrawlService().getUpdateCheckTask(taskId);
-    return response;
+    return CrawlService().getUpdateCheckTask(taskId);
+  }
+
+  bool _isRunning(dynamic status) {
+    final value = '${status ?? ''}'.toUpperCase();
+    return value == 'RUNNING' || value == 'PENDING' || value == 'QUEUED';
   }
 
   String _responseMessage(http.Response response) {
     final body = response.body.trim();
 
-    if (body.isEmpty) {
-      return 'HTTP ${response.statusCode}';
-    }
+    if (body.isEmpty) return 'HTTP ${response.statusCode}';
 
     try {
       final decoded = jsonDecode(body);
 
       if (decoded is String) return decoded;
-
       if (decoded is Map) {
         return '${decoded['message'] ?? decoded['error'] ?? body}';
       }
-    } catch (_) {
-      // Nội dung phản hồi không phải JSON.
-    }
+    } catch (_) {}
 
     return body;
   }
 
-  bool _isRunning(dynamic status) {
-    final value = '${status ?? ''}'.toUpperCase();
-
-    return value == 'RUNNING' || value == 'PENDING' || value == 'QUEUED';
-  }
-
   // ============================================================
-  // TASK UI
+  // TASK LIST
   // ============================================================
 
   void _showTaskList() {
@@ -287,7 +248,6 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
                     tooltip: 'Làm mới',
                     onPressed: () async {
                       await _loadUpdateTasks();
-
                       if (dialogContext.mounted) {
                         setDialogState(() {});
                       }
@@ -304,24 +264,26 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
                     : updateTasks.isEmpty
                     ? const Center(child: Text('Chưa có task nào'))
                     : ListView.separated(
-                        itemCount: updateTasks.length,
-                        separatorBuilder: (_, __) => const Divider(height: 20),
-                        itemBuilder: (context, index) {
-                          final task = updateTasks[index];
+                  itemCount: updateTasks.length,
+                  separatorBuilder: (_, __) =>
+                  const Divider(height: 20),
+                  itemBuilder: (context, index) {
+                    final task = updateTasks[index];
 
-                          return _buildTaskCard(
-                            task,
-                            onTap: () {
-                              final taskId = task['taskId']?.toString();
+                    return _buildTaskCard(
+                      task,
+                      onTap: () {
+                        final taskId =
+                        task['taskId']?.toString();
 
-                              if (taskId != null && taskId.isNotEmpty) {
-                                Navigator.pop(dialogContext);
-                                _showTaskDetails(taskId);
-                              }
-                            },
-                          );
-                        },
-                      ),
+                        if (taskId != null && taskId.isNotEmpty) {
+                          Navigator.pop(dialogContext);
+                          _showTaskDetails(taskId);
+                        }
+                      },
+                    );
+                  },
+                ),
               ),
               actions: [
                 TextButton(
@@ -336,12 +298,16 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
     );
   }
 
-  Widget _buildTaskCard(Map<String, dynamic> task, {VoidCallback? onTap}) {
+  Widget _buildTaskCard(
+      Map<String, dynamic> task, {
+        VoidCallback? onTap,
+      }) {
     final taskId = '${task['taskId'] ?? 'Không rõ'}';
     final status = '${task['status'] ?? 'UNKNOWN'}';
     final processed = _asInt(task['processed']);
     final total = _asInt(task['total']);
-    final progress = total > 0 ? (processed / total).clamp(0.0, 1.0) : 0.0;
+    final progress =
+    total > 0 ? (processed / total).clamp(0.0, 1.0) : 0.0;
 
     final storyId = task['storyId'];
     final message = '${task['message'] ?? 'Không có thông báo'}';
@@ -401,7 +367,6 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
     final normalized = status.toUpperCase();
 
     Color color;
-
     switch (normalized) {
       case 'COMPLETED':
         color = Colors.green;
@@ -438,21 +403,20 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
   void _showTaskDetails(String taskId) {
     showDialog(
       context: context,
-      builder: (dialogContext) {
-        return Dialog(
-          child: SizedBox(
-            width: 760,
-            height: 650,
-            child: _TaskDetailsDialog(
-              taskId: taskId,
-              loadTask: _getTaskDetails,
-              onRefreshTasks: _loadUpdateTasks,
-              isRunning: _isRunning,
-              asInt: _asInt,
-            ),
+      builder: (_) => Dialog(
+        child: SizedBox(
+          width: 760,
+          height: 650,
+          child: _TaskDetailsDialog(
+            taskId: taskId,
+            adminId: widget.adminId,
+            loadTask: _getTaskDetails,
+            onRefreshTasks: _loadUpdateTasks,
+            isRunning: _isRunning,
+            asInt: _asInt,
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -475,8 +439,7 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
         context: context,
         builder: (dialogContext) => AlertDialog(
           title: Text(
-            'Chương ${chapter['chapterNumber']}: '
-            '${chapter['title']}',
+            'Chương ${chapter['chapterNumber']}: ${chapter['title']}',
           ),
           content: SizedBox(
             width: 700,
@@ -494,7 +457,8 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: CachedNetworkImage(
-                      imageUrl: '${ApiConfig.chapterImage}/${block['data']}',
+                      imageUrl:
+                      '${ApiConfig.chapterImage}/${block['data']}',
                     ),
                   );
                 }
@@ -551,7 +515,6 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
   Future<void> _deleteChapter(int storyId, int chapterId) async {
     try {
       await ChapterFetcher().deleteChapter(chapterId, widget.adminId);
-
       await _loadChapters(storyId);
 
       if (!mounted) return;
@@ -655,9 +618,9 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
   void _showMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   // ============================================================
@@ -671,7 +634,7 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
         title: const Text('Quản lý truyện'),
         actions: [
           IconButton(
-            tooltip: 'Check task',
+            tooltip: 'Task kiểm tra cập nhật',
             onPressed: _showTaskList,
             icon: const Icon(Icons.task_alt),
           ),
@@ -682,10 +645,10 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
                 onPressed: isCheckingAll ? null : _checkAllUpdates,
                 icon: isCheckingAll
                     ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
                     : const Icon(Icons.sync),
                 label: const Text('Kiểm tra tất cả'),
               ),
@@ -696,134 +659,134 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: _loadStories,
-              child: ListView.builder(
-                padding: const EdgeInsets.all(10),
-                itemCount: stories.length,
-                itemBuilder: (context, index) {
-                  final story = stories[index];
-                  final id = _asInt(story['id']);
-                  final title = '${story['title'] ?? ''}';
+        onRefresh: _loadStories,
+        child: ListView.builder(
+          padding: const EdgeInsets.all(10),
+          itemCount: stories.length,
+          itemBuilder: (context, index) {
+            final story = stories[index];
+            final id = _asInt(story['id']);
+            final title = '${story['title'] ?? ''}';
 
-                  return Card(
-                    elevation: 3,
-                    margin: const EdgeInsets.symmetric(vertical: 6),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: ExpansionTile(
-                      tilePadding: const EdgeInsets.all(10),
-                      title: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: CachedNetworkImage(
-                              width: 60,
-                              height: 90,
-                              fit: BoxFit.cover,
-                              imageUrl:
-                                  '${ApiConfig.coverImage}/${story['coverUrl'] ?? ''}',
-                              placeholder: (_, __) => const SizedBox(
-                                width: 60,
-                                height: 90,
-                                child: Center(
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                ),
-                              ),
-                              errorWidget: (_, __, ___) => const SizedBox(
-                                width: 60,
-                                height: 90,
-                                child: Icon(Icons.image, size: 40),
-                              ),
+            return Card(
+              elevation: 3,
+              margin: const EdgeInsets.symmetric(vertical: 6),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: ExpansionTile(
+                tilePadding: const EdgeInsets.all(10),
+                title: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: CachedNetworkImage(
+                        width: 60,
+                        height: 90,
+                        fit: BoxFit.cover,
+                        imageUrl:
+                        '${ApiConfig.coverImage}/${story['coverUrl'] ?? ''}',
+                        placeholder: (_, __) => const SizedBox(
+                          width: 60,
+                          height: 90,
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
                             ),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  title,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'ID: $id',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey.shade600,
-                                  ),
-                                ),
-                                Text(
-                                  'Tạo bởi: ${story['createdByName'] ?? 'Unknown'}',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey.shade600,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                _buildStoryStatus(
-                                  '${story['status'] ?? 'UNKNOWN'}',
-                                ),
-                              ],
+                        ),
+                        errorWidget: (_, __, ___) => const SizedBox(
+                          width: 60,
+                          height: 90,
+                          child: Icon(Icons.image, size: 40),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
                             ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'ID: $id',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                          Text(
+                            'Tạo bởi: ${story['createdByName'] ?? 'Unknown'}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          _buildStoryStatus(
+                            '${story['status'] ?? 'UNKNOWN'}',
                           ),
                         ],
                       ),
-                      onExpansionChanged: (expanded) {
-                        if (expanded && !storyChapters.containsKey(id)) {
-                          _loadChapters(id);
-                        }
-                      },
-                      trailing: SizedBox(
-                        width: 152,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              tooltip: 'Kiểm tra cập nhật',
-                              onPressed: () => _checkStoryUpdates(id),
-                              icon: const Icon(Icons.sync, color: Colors.blue),
-                            ),
-                            if (story['status'] == 'PENDING') ...[
-                              IconButton(
-                                tooltip: 'Duyệt truyện',
-                                onPressed: () => _approveStory(id),
-                                icon: const Icon(
-                                  Icons.check,
-                                  color: Colors.green,
-                                ),
-                              ),
-                              IconButton(
-                                tooltip: 'Từ chối truyện',
-                                onPressed: () => _confirmRejectStory(id),
-                                icon: const Icon(
-                                  Icons.close,
-                                  color: Colors.orange,
-                                ),
-                              ),
-                            ],
-                            IconButton(
-                              tooltip: 'Xoá truyện',
-                              onPressed: () => _confirmDeleteStory(id),
-                              icon: const Icon(Icons.delete, color: Colors.red),
-                            ),
-                          ],
-                        ),
-                      ),
-                      children: _buildChapters(id),
                     ),
-                  );
+                  ],
+                ),
+                onExpansionChanged: (expanded) {
+                  if (expanded && !storyChapters.containsKey(id)) {
+                    _loadChapters(id);
+                  }
                 },
+                trailing: SizedBox(
+                  width: 152,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Kiểm tra cập nhật',
+                        onPressed: () => _checkStoryUpdates(id),
+                        icon: const Icon(Icons.sync, color: Colors.blue),
+                      ),
+                      if (story['status'] == 'PENDING') ...[
+                        IconButton(
+                          tooltip: 'Duyệt truyện',
+                          onPressed: () => _approveStory(id),
+                          icon: const Icon(
+                            Icons.check,
+                            color: Colors.green,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Từ chối truyện',
+                          onPressed: () => _confirmRejectStory(id),
+                          icon: const Icon(
+                            Icons.close,
+                            color: Colors.orange,
+                          ),
+                        ),
+                      ],
+                      IconButton(
+                        tooltip: 'Xoá truyện',
+                        onPressed: () => _confirmDeleteStory(id),
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                      ),
+                    ],
+                  ),
+                ),
+                children: _buildChapters(id),
               ),
-            ),
+            );
+          },
+        ),
+      ),
     );
   }
 
@@ -845,7 +808,10 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
 
     if (chapters.isEmpty) {
       return const [
-        Padding(padding: EdgeInsets.all(12), child: Text('Chưa có chương nào')),
+        Padding(
+          padding: EdgeInsets.all(12),
+          child: Text('Chưa có chương nào'),
+        ),
       ];
     }
 
@@ -862,8 +828,7 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
         child: ListTile(
           onTap: () => _viewChapter(chapterId),
           title: Text(
-            'Chương ${chapter['chapterNumber']}: '
-            '${chapter['title'] ?? ''}',
+            'Chương ${chapter['chapterNumber']}: ${chapter['title'] ?? ''}',
             style: const TextStyle(fontWeight: FontWeight.w500),
           ),
           subtitle: Text('${chapter['createdByName'] ?? ''}'),
@@ -886,7 +851,8 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
               ],
               IconButton(
                 tooltip: 'Xoá chương',
-                onPressed: () => _confirmDeleteChapter(storyId, chapterId),
+                onPressed: () =>
+                    _confirmDeleteChapter(storyId, chapterId),
                 icon: const Icon(Icons.delete, color: Colors.red),
               ),
             ],
@@ -924,13 +890,14 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
   Color _getStatusColor(String status) {
     switch (status.toUpperCase()) {
       case 'APPROVED':
+      case 'COMPLETED':
         return Colors.green;
       case 'PENDING':
         return Colors.orange;
       case 'REJECTED':
+      case 'FAILED':
+      case 'ERROR':
         return Colors.red;
-      case 'COMPLETED':
-        return Colors.green;
       case 'RUNNING':
         return Colors.blue;
       default:
@@ -941,11 +908,11 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
 
 // ================================================================
 // TASK DETAILS DIALOG
-// Mỗi taskId có dialog riêng, cập nhật tiến độ độc lập.
 // ================================================================
 
 class _TaskDetailsDialog extends StatefulWidget {
   final String taskId;
+  final int adminId;
   final Future<Map<String, dynamic>> Function(String) loadTask;
   final Future<void> Function() onRefreshTasks;
   final bool Function(dynamic) isRunning;
@@ -953,6 +920,7 @@ class _TaskDetailsDialog extends StatefulWidget {
 
   const _TaskDetailsDialog({
     required this.taskId,
+    required this.adminId,
     required this.loadTask,
     required this.onRefreshTasks,
     required this.isRunning,
@@ -967,6 +935,10 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
   Map<String, dynamic>? task;
   String? error;
   bool isLoading = true;
+  bool isCrawlingAll = false;
+
+  final Set<String> crawlingSources = <String>{};
+
   Timer? timer;
 
   @override
@@ -1011,6 +983,186 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
   }
 
   // ============================================================
+  // CRAWL NEW CHAPTERS
+  // ============================================================
+
+  String _sourceKey(Map<String, dynamic> result) {
+    final sourceUrl = '${result['sourceUrl'] ?? ''}'.trim();
+    if (sourceUrl.isNotEmpty) return sourceUrl;
+
+    return '${result['sourceId'] ?? result['sourceName'] ?? result['storyTitle']}';
+  }
+
+  /// Chuẩn bị payload theo API /import-selected.
+  Map<String, dynamic> _buildImportPayload(
+      Map<String, dynamic> result,
+      ) {
+    final sourceUrl = '${result['sourceUrl'] ?? ''}'.trim();
+
+    if (sourceUrl.isEmpty) {
+      throw Exception('Nguồn không có sourceUrl');
+    }
+
+    final rawStoryId = result['storyId'];
+    final storyId = widget.asInt(rawStoryId);
+
+    if (rawStoryId == null || storyId <= 0) {
+      throw Exception(
+        'Kết quả không có storyId hợp lệ. '
+            'Backend cần trả storyId trong mỗi kết quả kiểm tra.',
+      );
+    }
+
+    final rawChapters = result['chapters'];
+    final chapters = rawChapters is List ? rawChapters : <dynamic>[];
+
+    final selectedChapters = <Map<String, dynamic>>[];
+
+    for (final rawChapter in chapters) {
+      if (rawChapter is! Map) continue;
+
+      final chapter = Map<String, dynamic>.from(rawChapter);
+      final url = '${chapter['url'] ?? ''}'.trim();
+
+      if (url.isEmpty) continue;
+
+      selectedChapters.add({
+        'title': '${chapter['title'] ?? 'Chapter mới'}',
+        'url': url,
+        'order': chapter['order'],
+        'choosen': true,
+        'crawled': false,
+      });
+    }
+
+    if (selectedChapters.isEmpty) {
+      throw Exception('Nguồn này không có chapter hợp lệ để crawl');
+    }
+
+    return {
+      'title': '${result['storyTitle'] ?? 'Truyện chưa có tên'}',
+      'sourceUrl': sourceUrl,
+      'selectedStoryId': storyId,
+      'chapters': selectedChapters,
+    };
+  }
+
+  /// Gửi một nguồn đến backend.
+  /// Thành công ở đây nghĩa là API đã tiếp nhận yêu cầu,
+  /// không khẳng định toàn bộ chapter đã lưu xong.
+  Future<void> _crawlResult(Map<String, dynamic> result) async {
+    final sourceKey = _sourceKey(result);
+
+    if (crawlingSources.contains(sourceKey)) return;
+
+    setState(() {
+      crawlingSources.add(sourceKey);
+    });
+
+    try {
+      final payload = _buildImportPayload(result);
+
+      final response = await CrawlService().importStory(
+        payload,
+        widget.adminId,
+      );
+
+      if (!mounted) return;
+
+      final taskId = response['taskId']?.toString();
+      final message = response['message']?.toString();
+
+      _showDialogMessage(
+        message != null && message.isNotEmpty
+            ? message
+            : taskId != null && taskId.isNotEmpty
+            ? 'Đã gửi yêu cầu crawl. Task: $taskId'
+            : 'Backend đã tiếp nhận yêu cầu crawl.',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _showDialogMessage('Không thể crawl nguồn này: $e');
+    } finally {
+      if (mounted) {
+        setState(() => crawlingSources.remove(sourceKey));
+      }
+    }
+  }
+
+  /// Crawl tuần tự từng nguồn có chapter mới.
+  Future<void> _crawlAllResults(List<Map<String, dynamic>> results) async {
+    if (isCrawlingAll) return;
+
+    final candidates = results.where((result) {
+      final chapters = result['chapters'];
+      return chapters is List && chapters.isNotEmpty;
+    }).toList();
+
+    if (candidates.isEmpty) {
+      _showDialogMessage('Không có nguồn nào có chapter mới để crawl.');
+      return;
+    }
+
+    setState(() => isCrawlingAll = true);
+
+    var succeeded = 0;
+    var failed = 0;
+
+    try {
+      for (final result in candidates) {
+        if (!mounted) return;
+
+        final sourceKey = _sourceKey(result);
+
+        if (crawlingSources.contains(sourceKey)) {
+          continue;
+        }
+
+        setState(() => crawlingSources.add(sourceKey));
+
+        try {
+          final payload = _buildImportPayload(result);
+
+          await CrawlService().importStory(
+            payload,
+            widget.adminId,
+          );
+
+          succeeded++;
+        } catch (e) {
+          failed++;
+          debugPrint(
+            'Crawl lỗi nguồn ${result['sourceUrl']}: $e',
+          );
+        } finally {
+          if (mounted) {
+            setState(() => crawlingSources.remove(sourceKey));
+          }
+        }
+      }
+
+      if (!mounted) return;
+
+      _showDialogMessage(
+        'Đã gửi crawl tuần tự: $succeeded nguồn thành công, '
+            '$failed nguồn lỗi.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() => isCrawlingAll = false);
+      }
+    }
+  }
+
+  void _showDialogMessage(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  // ============================================================
   // COVER IMAGE
   // ============================================================
 
@@ -1026,7 +1178,8 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
     if (cover.startsWith('https://') || cover.startsWith('http://')) {
       imageUrl = cover;
     } else {
-      final baseUrl = ApiConfig.coverImage.replaceAll(RegExp(r'/+$'), '');
+      final baseUrl =
+      ApiConfig.coverImage.replaceAll(RegExp(r'/+$'), '');
       final path = cover.replaceAll(RegExp(r'^/+'), '');
       imageUrl = '$baseUrl/$path';
     }
@@ -1106,11 +1259,11 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
               ? const Center(child: CircularProgressIndicator())
               : error != null && current == null
               ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Text(error!),
-                  ),
-                )
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(error!),
+            ),
+          )
               : current == null
               ? const Center(child: Text('Không có dữ liệu task'))
               : _buildContent(current),
@@ -1123,12 +1276,15 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
     final status = '${current['status'] ?? 'UNKNOWN'}';
     final processed = widget.asInt(current['processed']);
     final total = widget.asInt(current['total']);
-
-    final progress = total > 0 ? (processed / total).clamp(0.0, 1.0) : 0.0;
+    final progress =
+    total > 0 ? (processed / total).clamp(0.0, 1.0) : 0.0;
 
     final results = current['results'] is List
-        ? current['results'] as List
-        : <dynamic>[];
+        ? (current['results'] as List)
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList()
+        : <Map<String, dynamic>>[];
 
     final errors = current['errors'] is List
         ? current['errors'] as List
@@ -1151,12 +1307,15 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
         statusColor = Colors.orange;
     }
 
+    final crawlableResults = results.where((result) {
+      final chapters = result['chapters'];
+      return chapters is List && chapters.isNotEmpty;
+    }).toList();
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // ========================================================
-        // TỔNG QUAN TASK
-        // ========================================================
+        // TASK OVERVIEW
         Card(
           elevation: 0,
           color: Theme.of(context).colorScheme.surfaceContainerLow,
@@ -1199,10 +1358,7 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                Text(
-                  'Task ID: ${current['taskId'] ?? widget.taskId}',
-                  style: const TextStyle(fontSize: 12),
-                ),
+                Text('Task ID: ${current['taskId'] ?? widget.taskId}'),
                 const SizedBox(height: 6),
                 Text(
                   current['storyId'] == null
@@ -1223,7 +1379,10 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                 const SizedBox(height: 8),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: LinearProgressIndicator(value: progress, minHeight: 8),
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 8,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 Text(
@@ -1240,9 +1399,7 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
 
         const SizedBox(height: 20),
 
-        // ========================================================
-        // KẾT QUẢ KIỂM TRA
-        // ========================================================
+        // RESULTS HEADER AND CRAWL ALL BUTTON
         Row(
           children: [
             const Icon(Icons.library_books_outlined, size: 20),
@@ -1256,16 +1413,34 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
             _countBadge(results.length, Colors.blue),
           ],
         ),
+        const SizedBox(height: 10),
+
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: isCrawlingAll || crawlableResults.isEmpty
+                ? null
+                : () => _crawlAllResults(crawlableResults),
+            icon: isCrawlingAll
+                ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+                : const Icon(Icons.download),
+            label: Text(
+              isCrawlingAll
+                  ? 'Đang gửi yêu cầu crawl...'
+                  : 'Crawl tất cả nguồn có chapter mới (${crawlableResults.length})',
+            ),
+          ),
+        ),
         const SizedBox(height: 8),
 
         if (results.isEmpty)
           _emptyTaskMessage('Chưa có kết quả kiểm tra.')
         else
-          ...results.map<Widget>((raw) {
-            final result = raw is Map
-                ? Map<String, dynamic>.from(raw)
-                : <String, dynamic>{};
-
+          ...results.map<Widget>((result) {
             final chapters = result['chapters'] is List
                 ? result['chapters'] as List
                 : <dynamic>[];
@@ -1273,6 +1448,9 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
             final chapterCount = widget.asInt(
               result['newChapterCount'] ?? chapters.length,
             );
+
+            final sourceKey = _sourceKey(result);
+            final isCrawling = crawlingSources.contains(sourceKey);
 
             return Card(
               margin: const EdgeInsets.only(bottom: 8),
@@ -1287,10 +1465,7 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                   vertical: 4,
                 ),
                 childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-
-                // ẢNH BÌA TRUYỆN
                 leading: _buildCover(result['coverUrl']),
-
                 title: Text(
                   '${result['storyTitle'] ?? 'Không rõ truyện'}',
                   style: const TextStyle(
@@ -1302,7 +1477,7 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                   padding: const EdgeInsets.only(top: 5),
                   child: Text(
                     '${result['sourceName'] ?? 'Không rõ nguồn'}'
-                    ' • $chapterCount chapter mới',
+                        ' • $chapterCount chapter mới',
                     style: const TextStyle(fontSize: 12),
                   ),
                 ),
@@ -1316,6 +1491,34 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                       ),
                     ),
                   const SizedBox(height: 8),
+
+                  // CRAWL THIS SOURCE
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: chapters.isEmpty ||
+                          isCrawling ||
+                          isCrawlingAll
+                          ? null
+                          : () => _crawlResult(result),
+                      icon: isCrawling
+                          ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                        ),
+                      )
+                          : const Icon(Icons.download),
+                      label: Text(
+                        isCrawling
+                            ? 'Đang gửi yêu cầu...'
+                            : 'Crawl nguồn này',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
                   if (chapters.isEmpty)
                     const Align(
                       alignment: Alignment.centerLeft,
@@ -1354,9 +1557,9 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                                     'Thứ tự: ${chapter['order'] ?? '?'}',
                                     style: TextStyle(
                                       fontSize: 11,
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSurfaceVariant,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
                                     ),
                                   ),
                                   if (chapter['url'] != null)
@@ -1378,9 +1581,7 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
 
         const SizedBox(height: 16),
 
-        // ========================================================
-        // NGUỒN GẶP LỖI
-        // ========================================================
+        // ERRORS
         Row(
           children: [
             const Icon(Icons.error_outline, size: 20, color: Colors.red),
@@ -1409,11 +1610,7 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
               elevation: 0,
               color: Colors.red.withValues(alpha: 0.04),
               child: ListTile(
-                dense: false,
-
-                // ẢNH BÌA TRUYỆN KHI NGUỒN GẶP LỖI
                 leading: _buildCover(item['coverUrl']),
-
                 title: Text(
                   '${item['storyTitle'] ?? item['sourceName'] ?? 'Nguồn không rõ'}',
                   style: const TextStyle(
