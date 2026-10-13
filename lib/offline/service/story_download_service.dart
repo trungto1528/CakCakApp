@@ -41,12 +41,20 @@ class StoryDownloadService {
 
   static final StoryDownloadService instance = StoryDownloadService._();
 
-  static const int _maxConcurrentImages = 12;
-  static const Duration _requestTimeout = Duration(minutes: 3);
+  // Giảm tải đồng thời để ổn định hơn trên mạng yếu.
+  static const int _maxConcurrentImages = 16;
+
+  // Timeout riêng cho package và từng ảnh.
+  static const Duration _packageTimeout = Duration(seconds: 60);
+  static const Duration _imageTimeout = Duration(seconds: 30);
+
+  // Tổng số lần thử, tính cả lần đầu.
+  static const int _maxAttempts = 5;
 
   final Map<int, Future<void>> _activeDownloads = {};
-  final Map<int, ValueNotifier<StoryDownloadProgress>> _progressNotifiers =
-  {};
+
+  final Map<int, ValueNotifier<StoryDownloadProgress>>
+  _progressNotifiers = {};
 
   ValueNotifier<StoryDownloadProgress> progressFor(int storyId) {
     return _progressNotifiers.putIfAbsent(
@@ -126,24 +134,129 @@ class StoryDownloadService {
     });
   }
 
+  void _emitStatus(
+      int storyId,
+      String message,
+      void Function(String message)? onStatus,
+      ) {
+    _updateProgress(storyId, status: message);
+    onStatus?.call(message);
+  }
+
+  void _emitProgress(
+      int storyId,
+      int completed,
+      int total,
+      String current,
+      void Function(int completed, int total, String current)? onProgress,
+      ) {
+    _updateProgress(
+      storyId,
+      completed: completed,
+      total: total,
+      current: current,
+    );
+
+    onProgress?.call(completed, total, current);
+  }
+
+  /// Gửi HTTP request với timeout và retry.
+  Future<http.Response> _getWithRetry({
+    required Uri uri,
+    required Duration timeout,
+    required String description,
+    required void Function(String message) onRetryStatus,
+  }) async {
+    Object? lastError;
+
+    for (var attempt = 1; attempt <= _maxAttempts; attempt++) {
+      try {
+        final response = await http.get(uri).timeout(timeout);
+
+        if (response.statusCode == 200 &&
+            response.bodyBytes.isNotEmpty) {
+          return response;
+        }
+
+        throw HttpException(
+          '$description: HTTP ${response.statusCode}',
+        );
+      } catch (e) {
+        lastError = e;
+
+        if (attempt >= _maxAttempts) {
+          break;
+        }
+
+        onRetryStatus(
+          '$description thất bại. Thử lại '
+              '($attempt/$_maxAttempts)...',
+        );
+
+        await Future<void>.delayed(
+          Duration(milliseconds: 700 * attempt),
+        );
+      }
+    }
+
+    throw Exception(
+      '$description thất bại sau $_maxAttempts lần thử: $lastError',
+    );
+  }
+
+  Future<void> _downloadImage({
+    required String imageUrl,
+    required File targetFile,
+    required String imagePath,
+    required void Function(String message) onRetryStatus,
+  }) async {
+    final temporaryFile = File('${targetFile.path}.part');
+
+    try {
+      final response = await _getWithRetry(
+        uri: Uri.parse(imageUrl),
+        timeout: _imageTimeout,
+        description: 'Tải ảnh $imagePath',
+        onRetryStatus: onRetryStatus,
+      );
+
+      await targetFile.parent.create(recursive: true);
+
+      // Ghi vào file tạm trước, tránh để lại ảnh tải dở.
+      await temporaryFile.writeAsBytes(
+        response.bodyBytes,
+        flush: true,
+      );
+
+      if (await targetFile.exists()) {
+        await targetFile.delete();
+      }
+
+      await temporaryFile.rename(targetFile.path);
+    } finally {
+      if (await temporaryFile.exists()) {
+        await temporaryFile.delete();
+      }
+    }
+  }
+
   Future<void> _downloadStoryInternal(
       int storyId, {
         void Function(int completed, int total, String current)? onProgress,
         void Function(String message)? onStatus,
       }) async {
     void status(String message) {
-      _updateProgress(storyId, status: message);
-      onStatus?.call(message);
+      _emitStatus(storyId, message, onStatus);
     }
 
     void progress(int completed, int total, String current) {
-      _updateProgress(
+      _emitProgress(
         storyId,
-        completed: completed,
-        total: total,
-        current: current,
+        completed,
+        total,
+        current,
+        onProgress,
       );
-      onProgress?.call(completed, total, current);
     }
 
     try {
@@ -156,21 +269,20 @@ class StoryDownloadService {
         await completeMarker.delete();
       }
 
+      // 1. Tải package, tự thử lại nếu kết nối lỗi.
       status('Đang tải package truyện...');
 
       final packageUrl =
           '${ApiConfig.api}/stories/$storyId/package.zip';
 
-      final response = await http
-          .get(Uri.parse(packageUrl))
-          .timeout(_requestTimeout);
+      final response = await _getWithRetry(
+        uri: Uri.parse(packageUrl),
+        timeout: _packageTimeout,
+        description: 'Tải package truyện',
+        onRetryStatus: status,
+      );
 
-      if (response.statusCode != 200) {
-        throw Exception(
-          'Không tải được package. HTTP ${response.statusCode}',
-        );
-      }
-
+      // 2. Giải nén package.
       status('Đang giải nén package...');
 
       final archive = ZipDecoder().decodeBytes(response.bodyBytes);
@@ -185,7 +297,9 @@ class StoryDownloadService {
         if (name.startsWith('/') ||
             name.contains(':') ||
             parts.any((part) => part == '..')) {
-          throw Exception('Package chứa đường dẫn không hợp lệ: $name');
+          throw Exception(
+            'Package chứa đường dẫn không hợp lệ: $name',
+          );
         }
 
         final content = entry.content;
@@ -216,7 +330,9 @@ class StoryDownloadService {
               relativePath.isEmpty ||
               relativePath == '.' ||
               relativePath == '..') {
-            throw Exception('Tên file chapter không hợp lệ: $name');
+            throw Exception(
+              'Tên file chapter không hợp lệ: $name',
+            );
           }
 
           final chapterDirectory =
@@ -230,6 +346,7 @@ class StoryDownloadService {
         }
       }
 
+      // 3. Kiểm tra metadata.
       final metadataFile = File('${directory.path}/metadata.json');
 
       if (!await metadataFile.exists()) {
@@ -251,77 +368,95 @@ class StoryDownloadService {
       metadata['imageBaseUrl']?.toString().trim();
 
       final imageBaseUrl =
-      configuredBaseUrl != null && configuredBaseUrl.isNotEmpty
-          ? configuredBaseUrl.replaceFirst(RegExp(r'/+$'), '')
+      configuredBaseUrl != null &&
+          configuredBaseUrl.isNotEmpty
+          ? configuredBaseUrl.replaceFirst(
+        RegExp(r'/+$'),
+        '',
+      )
           : ApiConfig.image;
 
+      // 4. Chuẩn hóa danh sách ảnh.
       final uniqueImagePaths = imageList.toSet().toList();
 
       for (final imagePath in uniqueImagePaths) {
         _validateImagePath(imagePath);
       }
 
-      status('Đang tải ảnh: ${uniqueImagePaths.length} ảnh...');
-
+      final total = uniqueImagePaths.length;
       var completed = 0;
-      progress(completed, uniqueImagePaths.length, '');
+      var nextIndex = 0;
 
-      for (var i = 0;
-      i < uniqueImagePaths.length;
-      i += _maxConcurrentImages) {
-        final end = (i + _maxConcurrentImages)
-            .clamp(0, uniqueImagePaths.length);
+      // Lưu các lỗi cuối cùng để thử hết ảnh còn lại,
+      // không để một ảnh lỗi dừng cả hàng đợi.
+      final failures = <String>[];
 
-        final batch = uniqueImagePaths.sublist(i, end);
+      status('Chuẩn bị tải $total ảnh...');
+      progress(0, total, '');
 
-        await Future.wait(
-          batch.map((imagePath) async {
-            final targetFile = File('${directory.path}/$imagePath');
+      // 5. Mỗi worker xử lý ảnh kế tiếp trong hàng đợi.
+      Future<void> worker() async {
+        while (true) {
+          if (nextIndex >= total) return;
+
+          // Lấy chỉ số trước await để mỗi ảnh chỉ được xử lý một lần.
+          final index = nextIndex++;
+
+          final imagePath = uniqueImagePaths[index];
+          final targetFile = File('${directory.path}/$imagePath');
+
+          try {
             await targetFile.parent.create(recursive: true);
 
+            // Giữ lại ảnh đã tải thành công ở lần trước.
             if (await targetFile.exists() &&
                 await targetFile.length() > 0) {
-              completed++;
-              progress(completed, uniqueImagePaths.length, imagePath);
-              return;
-            }
+              // Bỏ qua ảnh đã có.
+            } else {
+              final imageUrl = '$imageBaseUrl/$imagePath';
 
-            final imageUrl = '$imageBaseUrl/$imagePath';
-
-            final imageResponse = await http
-                .get(Uri.parse(imageUrl))
-                .timeout(_requestTimeout);
-
-            if (imageResponse.statusCode != 200 ||
-                imageResponse.bodyBytes.isEmpty) {
-              throw Exception(
-                'Không tải được ảnh $imagePath '
-                    '(HTTP ${imageResponse.statusCode})',
+              await _downloadImage(
+                imageUrl: imageUrl,
+                targetFile: targetFile,
+                imagePath: imagePath,
+                onRetryStatus: (message) {
+                  status(message);
+                },
               );
             }
-
-            final temporaryFile = File('${targetFile.path}.part');
-
-            try {
-              await temporaryFile.writeAsBytes(
-                imageResponse.bodyBytes,
-                flush: true,
-              );
-
-              if (await targetFile.exists()) {
-                await targetFile.delete();
-              }
-
-              await temporaryFile.rename(targetFile.path);
-            } finally {
-              if (await temporaryFile.exists()) {
-                await temporaryFile.delete();
-              }
-            }
-
+          } catch (e) {
+            failures.add('$imagePath: $e');
+          } finally {
             completed++;
-            progress(completed, uniqueImagePaths.length, imagePath);
-          }),
+
+            progress(
+              completed,
+              total,
+              imagePath,
+            );
+
+            status(
+              'Đã xử lý $completed/$total ảnh',
+            );
+          }
+        }
+      }
+
+      final workerCount =
+      total < _maxConcurrentImages ? total : _maxConcurrentImages;
+
+      await Future.wait(
+        List.generate(workerCount, (_) => worker()),
+      );
+
+      // 6. Không đánh dấu hoàn tất nếu còn ảnh lỗi hoặc thiếu.
+      if (failures.isNotEmpty) {
+        final preview = failures.take(5).join('\n');
+
+        throw Exception(
+          '${failures.length} ảnh không tải được:\n$preview'
+              '${failures.length > 5 ? '\n...' : ''}\n'
+              'Nhấn tải lại để tiếp tục tải các ảnh còn thiếu.',
         );
       }
 
@@ -333,6 +468,7 @@ class StoryDownloadService {
         }
       }
 
+      // 7. Ghi manifest sau khi tất cả ảnh thành công.
       final manifest = <String, dynamic>{
         'storyId': storyId,
         'title': metadata['title'],
@@ -349,8 +485,9 @@ class StoryDownloadService {
       _updateProgress(
         storyId,
         status: 'Tải truyện hoàn tất.',
-        completed: uniqueImagePaths.length,
-        total: uniqueImagePaths.length,
+        completed: total,
+        total: total,
+        current: '',
         isDownloading: false,
         isCompleted: true,
         clearError: true,
@@ -372,7 +509,9 @@ class StoryDownloadService {
 
   Future<void> deleteDownloadedStory(int storyId) async {
     if (isDownloading(storyId)) {
-      throw Exception('Không thể xóa khi truyện đang được tải.');
+      throw Exception(
+        'Không thể xóa khi truyện đang được tải.',
+      );
     }
 
     final directory = await _storyDirectory(storyId);
@@ -403,7 +542,9 @@ class StoryDownloadService {
         parts[1] == '.' ||
         parts[1] == '..' ||
         parts[1].contains(':')) {
-      throw Exception('Đường dẫn ảnh không hợp lệ: $imagePath');
+      throw Exception(
+        'Đường dẫn ảnh không hợp lệ: $imagePath',
+      );
     }
   }
 }

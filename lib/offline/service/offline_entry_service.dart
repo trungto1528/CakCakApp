@@ -1,4 +1,3 @@
-
 import 'dart:convert';
 import 'dart:io';
 
@@ -113,8 +112,7 @@ class OfflineEntryService {
     return stories.where((story) {
       final title = (story['title'] ?? '').toString().toLowerCase();
       final author = (story['author'] ?? '').toString().toLowerCase();
-      final description =
-      (story['description'] ?? '').toString().toLowerCase();
+      final description = (story['description'] ?? '').toString().toLowerCase();
 
       return title.contains(query) ||
           author.contains(query) ||
@@ -123,10 +121,7 @@ class OfflineEntryService {
   }
 
   /// Đọc nội dung một chương đã tải.
-  Future<Map<String, dynamic>?> getChapter(
-      int storyId,
-      int chapterId,
-      ) async {
+  Future<Map<String, dynamic>?> getChapter(int storyId, int chapterId) async {
     final directory = await _getStoryDirectory(storyId);
     if (directory == null) return null;
 
@@ -141,10 +136,7 @@ class OfflineEntryService {
   }
 
   /// Lấy file ảnh cục bộ, ví dụ cover/abc.jpg hoặc chapter/xyz.webp.
-  Future<File?> getImage(
-      int storyId,
-      String imagePath,
-      ) async {
+  Future<File?> getImage(int storyId, String imagePath) async {
     final normalizedPath = imagePath.replaceAll('\\', '/');
     final parts = normalizedPath.split('/');
 
@@ -168,5 +160,35 @@ class OfflineEntryService {
     }
 
     return file;
+  }
+
+  /// Lấy ảnh bìa từ package Offline.
+  Future<File?> getCoverImage(int storyId) async {
+    final directory = await _getStoryDirectory(storyId);
+    if (directory == null) return null;
+
+    final marker = File('${directory.path}/complete.json');
+    if (!await marker.exists()) return null;
+
+    try {
+      final decoded = jsonDecode(await marker.readAsString());
+      if (decoded is! Map) return null;
+
+      final images = decoded['images'];
+      if (images is! List) return null;
+
+      for (final item in images) {
+        final path = item.toString().replaceAll('\\', '/');
+
+        if (!path.startsWith('cover/')) continue;
+
+        final file = await getImage(storyId, path);
+        if (file != null) return file;
+      }
+    } catch (e) {
+      // Package không hợp lệ hoặc không đọc được.
+    }
+
+    return null;
   }
 }
