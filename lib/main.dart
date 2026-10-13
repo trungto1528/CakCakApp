@@ -2,9 +2,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:novel_app/route_observer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-import 'services/offline_mode_service.dart';
-
 import 'models/app_theme_mode.dart';
 import 'screens/main_screen.dart';
 import 'platforms/windows/windows_main_screen.dart';
