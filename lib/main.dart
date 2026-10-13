@@ -1,4 +1,3 @@
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:novel_app/route_observer.dart';
@@ -7,9 +6,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'models/app_theme_mode.dart';
 import 'screens/main_screen.dart';
 import 'platforms/windows/windows_main_screen.dart';
+import 'offline/service/offline_mode_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Khôi phục trạng thái Offline, mặc định là false.
+  await OfflineModeService.initialize();
 
   final prefs = await SharedPreferences.getInstance();
   final index = prefs.getInt('themeMode') ?? 2;
@@ -87,14 +90,12 @@ class _MyAppState extends State<MyApp> {
       navigatorObservers: [routeObserver],
       debugShowCheckedModeBanner: false,
       themeMode: _flutterThemeMode,
-
       theme: ThemeData(
         useMaterial3: true,
         colorSchemeSeed: Colors.blue,
         brightness: Brightness.light,
         scaffoldBackgroundColor: const Color(0xFFF5F5F5),
       ),
-
       darkTheme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
@@ -116,7 +117,6 @@ class _MyAppState extends State<MyApp> {
           bodyMedium: TextStyle(color: Color(0xFFBDBDBD)),
         ),
       ),
-
       home: _buildPlatformHome(),
     );
   }

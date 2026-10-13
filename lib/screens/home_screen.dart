@@ -1,4 +1,3 @@
-
 import 'dart:async';
 import 'dart:convert';
 
@@ -14,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/api_config.dart';
 import '../models/User.dart';
+import '../offline/service/offline_mode_service.dart';
 import '../route_observer.dart';
 import '../services/auth.dart';
 
@@ -27,12 +27,9 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> with RouteAware {
   String? lastStoryTitle;
   double? lastChapterNumber;
-
   late Future<List<dynamic>> latestStoriesFuture;
-
   Timer? _debounce;
   String keyword = '';
-
   int? userId;
   int? lastStoryId;
   int? lastChapterId;
@@ -49,7 +46,6 @@ class _HomePageState extends State<HomePage> with RouteAware {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-
     final route = ModalRoute.of(context);
     if (route != null) {
       routeObserver.subscribe(this, route);
@@ -66,7 +62,6 @@ class _HomePageState extends State<HomePage> with RouteAware {
   @override
   void didPopNext() {
     _loadLastRead();
-
     setState(() {
       latestStoriesFuture = StoryFetcher().fetchLatestStories();
     });
@@ -75,12 +70,10 @@ class _HomePageState extends State<HomePage> with RouteAware {
   Future<void> _loadLastRead() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-
       final storedUser = prefs.getString('user');
       int? storedStoryId = prefs.getInt('lastStoryId');
       int? storedChapterId = prefs.getInt('lastChapterId');
       String? storedCreatedBy = prefs.getString('lastReadCreatedBy');
-
       String? storyTitle;
       String? cover;
       double? chapterNumber;
@@ -106,7 +99,6 @@ class _HomePageState extends State<HomePage> with RouteAware {
           storedChapterId != null &&
           storedCreatedBy != null) {
         final storyData = await StoryFetcher().fetchStory(storedStoryId);
-
         storyTitle = storyData['title']?.toString();
         cover = storyData['coverUrl']?.toString();
 
@@ -114,7 +106,6 @@ class _HomePageState extends State<HomePage> with RouteAware {
         await ChapterFetcher().fetchChapter(storedChapterId);
 
         final rawChapterNumber = chapterData['chapterNumber'];
-
         if (rawChapterNumber is num) {
           chapterNumber = rawChapterNumber.toDouble();
         } else {
@@ -141,14 +132,32 @@ class _HomePageState extends State<HomePage> with RouteAware {
 
   void onSearchChanged(String value) {
     _debounce?.cancel();
-
     _debounce = Timer(const Duration(milliseconds: 400), () {
       if (!mounted) return;
-
       setState(() {
         keyword = value;
       });
     });
+  }
+
+  /// Công tắc Online/Offline hiển thị trên AppBar.
+  Widget _buildOfflineModeButton() {
+    return ValueListenableBuilder<bool>(
+      valueListenable: OfflineModeService.isOffline,
+      builder: (context, isOffline, _) {
+        return IconButton(
+          tooltip: isOffline
+              ? 'Đang Offline — chuyển sang Online'
+              : 'Đang Online — chuyển sang Offline',
+          icon: Icon(
+            isOffline ? Icons.cloud_off : Icons.cloud_done,
+          ),
+          onPressed: () async {
+            await OfflineModeService.setOffline(!isOffline);
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -157,6 +166,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
       appBar: AppBar(
         title: const Text('Cạk Cạk Cạk'),
         actions: [
+          _buildOfflineModeButton(),
           IconButton(
             icon: const Icon(Icons.search),
             tooltip: 'Tìm kiếm',
@@ -303,9 +313,6 @@ class _HomePageState extends State<HomePage> with RouteAware {
               builder: (context, constraints) {
                 final isWindows = !kIsWeb &&
                     defaultTargetPlatform == TargetPlatform.windows;
-
-                // Windows dùng 3 cột khi đủ rộng.
-                // Android và các nền tảng khác vẫn dùng danh sách một cột.
                 final useGrid =
                     isWindows && constraints.maxWidth >= 650;
 

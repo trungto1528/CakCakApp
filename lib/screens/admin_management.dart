@@ -746,7 +746,7 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
                   }
                 },
                 trailing: SizedBox(
-                  width: 152,
+                  width: 100,
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [

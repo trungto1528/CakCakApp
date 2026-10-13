@@ -5,6 +5,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:novel_app/config/api_config.dart';
+import 'package:novel_app/offline/service/offline_entry_service.dart';
+import 'package:novel_app/offline/service/story_download_service.dart';
 import 'package:novel_app/screens/chapter_reader_screen.dart';
 import 'package:novel_app/services/bookmark.dart';
 import 'package:novel_app/services/story_fetcher.dart';
@@ -32,6 +34,13 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
   bool bookmarkLoading = false;
   bool isSaved = false;
 
+  bool downloadLoading = false;
+  bool isDownloaded = false;
+  double downloadProgress = 0;
+  String downloadStatus = '';
+
+  late final ValueNotifier<StoryDownloadProgress> _downloadNotifier;
+
   List chapters = [];
 
   static const int _pageSize = 20;
@@ -40,7 +49,40 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
   @override
   void initState() {
     super.initState();
+
+    _downloadNotifier =
+        StoryDownloadService.instance.progressFor(widget.storyId);
+    _downloadNotifier.addListener(_onDownloadProgressChanged);
+
+    _syncDownloadProgress();
     init();
+  }
+
+  void _onDownloadProgressChanged() {
+    if (!mounted) return;
+    _syncDownloadProgress();
+  }
+
+  void _syncDownloadProgress() {
+    final progress = _downloadNotifier.value;
+
+    if (!mounted) return;
+
+    setState(() {
+      downloadLoading = progress.isDownloading;
+      downloadProgress = progress.progress;
+      downloadStatus = progress.status;
+
+      if (progress.isCompleted) {
+        isDownloaded = true;
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _downloadNotifier.removeListener(_onDownloadProgressChanged);
+    super.dispose();
   }
 
   Future<void> init() async {
@@ -51,6 +93,139 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     if (!mounted) return;
 
     await _loadSaved();
+    if (!mounted) return;
+
+    await _checkDownloaded();
+  }
+
+  Future<void> _checkDownloaded() async {
+    try {
+      final available = await OfflineEntryService.instance.isStoryAvailable(
+        widget.storyId,
+      );
+
+      if (!mounted) return;
+
+      final taskProgress = _downloadNotifier.value;
+
+      setState(() {
+        isDownloaded = available || taskProgress.isCompleted;
+        downloadLoading = taskProgress.isDownloading;
+        downloadProgress = taskProgress.progress;
+        downloadStatus = taskProgress.status;
+      });
+    } catch (e) {
+      debugPrint('Lỗi kiểm tra truyện đã tải: $e');
+    }
+  }
+
+  Future<void> _downloadStory() async {
+    final service = StoryDownloadService.instance;
+    final taskProgress = service.progressFor(widget.storyId).value;
+
+    if (taskProgress.isDownloading || service.isDownloading(widget.storyId)) {
+      _syncDownloadProgress();
+      return;
+    }
+
+    if (isDownloaded) {
+      await _showDeleteDownloadDialog();
+      return;
+    }
+
+    try {
+      await service.downloadStory(
+        widget.storyId,
+        onProgress: (int completed, int total, String current) {
+          // Trạng thái được cập nhật tập trung trong service.
+          // Callback này không cần gọi setState riêng.
+        },
+        onStatus: (String message) {
+          // Service phát trạng thái qua ValueNotifier.
+        },
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        isDownloaded = true;
+        downloadProgress = 1;
+        downloadStatus = 'Đã tải xong';
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tải truyện hoàn tất.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Lỗi tải truyện: $e')),
+      );
+    } finally {
+      if (mounted) {
+        _syncDownloadProgress();
+      }
+    }
+  }
+
+  Future<void> _showDeleteDownloadDialog() async {
+    if (StoryDownloadService.instance.isDownloading(widget.storyId)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Không thể xóa khi truyện đang được tải.'),
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Xóa bản tải?'),
+        content: const Text(
+          'Truyện sẽ bị xóa khỏi thiết bị và không thể đọc offline '
+              'cho đến khi tải lại.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Hủy'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Xóa'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await StoryDownloadService.instance.deleteDownloadedStory(
+        widget.storyId,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        isDownloaded = false;
+        downloadProgress = 0;
+        downloadStatus = '';
+        downloadLoading = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Đã xóa bản tải')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Không thể xóa bản tải: $e')),
+      );
+    }
   }
 
   void _showLoginRequiredDialog() {
@@ -127,8 +302,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     }
 
     try {
-      final result =
-      await Bookmark().isSavedApi(user!.id, widget.storyId);
+      final result = await Bookmark().isSavedApi(user!.id, widget.storyId);
 
       if (!mounted) return;
 
@@ -216,22 +390,16 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
 
     final sortedKeys = map.keys.toList()..sort();
 
-    return {
-      for (final number in sortedKeys) number: map[number]!,
-    };
+    return {for (final number in sortedKeys) number: map[number]!};
   }
 
-  int get _totalPages {
-    return (groupedChapters.length / _pageSize).ceil();
-  }
+  int get _totalPages => (groupedChapters.length / _pageSize).ceil();
 
   Map<double, List<dynamic>> get paginatedChapters {
     final entries = groupedChapters.entries.toList();
     final start = _currentPage * _pageSize;
 
-    if (start >= entries.length) {
-      return {};
-    }
+    if (start >= entries.length) return {};
 
     final end = (start + _pageSize).clamp(0, entries.length);
 
@@ -248,13 +416,10 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     });
   }
 
-  // Phần thông tin bổ sung của truyện.
   Widget _buildInformation() {
     final List information = story['information'] ?? [];
 
-    if (information.isEmpty) {
-      return const SizedBox.shrink();
-    }
+    if (information.isEmpty) return const SizedBox.shrink();
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -265,26 +430,18 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
           border: Border.all(color: Colors.grey.shade200),
         ),
         child: Theme(
-          data: Theme.of(context).copyWith(
-            dividerColor: Colors.transparent,
-          ),
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
           child: ExpansionTile(
             initiallyExpanded: false,
             tilePadding: const EdgeInsets.symmetric(horizontal: 14),
             childrenPadding: const EdgeInsets.only(bottom: 8),
             title: const Text(
               'Thông tin thêm',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             subtitle: Text(
               '${information.length} thông tin',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey.shade600,
-              ),
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
             ),
             children: [
               ...information.asMap().entries.map((entry) {
@@ -317,19 +474,14 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                           Expanded(
                             child: Text(
                               value,
-                              style: TextStyle(
-                                color: Colors.grey.shade700,
-                              ),
+                              style: TextStyle(color: Colors.grey.shade700),
                             ),
                           ),
                         ],
                       ),
                     ),
                     if (index != information.length - 1)
-                      Divider(
-                        height: 1,
-                        color: Colors.grey.shade200,
-                      ),
+                      Divider(height: 1, color: Colors.grey.shade200),
                   ],
                 );
               }),
@@ -340,7 +492,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     );
   }
 
-  // Thông tin truyện: ảnh bìa, tên, tác giả, mô tả.
   Widget _buildStoryInformationContent() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -362,9 +513,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                     width: 120,
                     height: 180,
                     child: Center(
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                      ),
+                      child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                   ),
                   errorWidget: (_, __, ___) => const SizedBox(
@@ -407,21 +556,14 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     );
   }
 
-  // Phân trang danh sách chương.
   Widget _buildPagination() {
-    if (_totalPages <= 1) {
-      return const SizedBox.shrink();
-    }
+    if (_totalPages <= 1) return const SizedBox.shrink();
 
     return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 8,
-        vertical: 16,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
       child: Wrap(
         alignment: WrapAlignment.center,
         crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: 0,
         children: [
           IconButton(
             tooltip: 'Trang đầu',
@@ -437,10 +579,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
           ),
           Container(
             constraints: const BoxConstraints(minWidth: 100),
-            padding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 8,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.primaryContainer,
               borderRadius: BorderRadius.circular(8),
@@ -473,7 +612,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     );
   }
 
-  // Danh sách chương và các nguồn của cùng một chương.
   Widget _buildChaptersContent() {
     final grouped = groupedChapters;
     final paginated = paginatedChapters;
@@ -485,10 +623,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
           padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Text(
             'Danh sách chương',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
           ),
         ),
         Padding(
@@ -496,18 +631,13 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
           child: Text(
             '${grouped.length} chương · '
                 '${_totalPages == 0 ? 0 : _currentPage + 1}/$_totalPages trang',
-            style: TextStyle(
-              color: Colors.grey.shade600,
-              fontSize: 13,
-            ),
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
           ),
         ),
         if (grouped.isEmpty)
           const Padding(
             padding: EdgeInsets.all(24),
-            child: Center(
-              child: Text('Chưa có chương nào'),
-            ),
+            child: Center(child: Text('Chưa có chương nào')),
           ),
         ...paginated.entries.map((entry) {
           final chapterNumber = entry.key;
@@ -528,6 +658,8 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                 ),
               ),
               ...list.map((c) {
+                final source = c['createdBy']?.toString() ?? '';
+
                 return Container(
                   margin: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -536,9 +668,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                   decoration: BoxDecoration(
                     color: Theme.of(context).cardColor,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.grey.shade200,
-                    ),
+                    border: Border.all(color: Colors.grey.shade200),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withOpacity(0.03),
@@ -558,14 +688,12 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                     ),
                     title: Text(
                       c['title']?.toString() ?? 'Không có tiêu đề',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: const TextStyle(fontWeight: FontWeight.w600),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     subtitle: Text(
-                      'Source: ${c['createdBy'] ?? 'Không rõ'}',
+                      'Source: ${source.isEmpty ? 'Không rõ' : source}',
                       style: TextStyle(
                         fontSize: 13,
                         color: Colors.grey.shade600,
@@ -582,7 +710,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                           builder: (_) => ChapterReaderScreen(
                             chapterId: c['id'],
                             storyId: widget.storyId,
-                            source: c['createdBy'],
+                            source: source,
                           ),
                         ),
                       );
@@ -599,7 +727,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     );
   }
 
-  // Mỗi cột có vùng cuộn riêng trên Windows.
   Widget _buildWindowsLayout() {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -614,9 +741,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                   child: ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.only(bottom: 24),
-                    children: [
-                      _buildStoryInformationContent(),
-                    ],
+                    children: [_buildStoryInformationContent()],
                   ),
                 ),
               ),
@@ -631,9 +756,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.only(bottom: 24),
-              children: [
-                _buildChaptersContent(),
-              ],
+              children: [_buildChaptersContent()],
             ),
           ),
         ),
@@ -641,7 +764,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     );
   }
 
-  // Bố cục một cột cho Android và màn hình hẹp.
   Widget _buildMobileLayout() {
     return RefreshIndicator(
       onRefresh: init,
@@ -656,13 +778,115 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     );
   }
 
+  Widget _buildDownloadButton() {
+    final taskProgress = _downloadNotifier.value;
+
+    if (downloadLoading || taskProgress.isDownloading) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Center(
+          child: SizedBox(
+            width: 28,
+            height: 28,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  value: downloadProgress > 0 ? downloadProgress : null,
+                ),
+                if (taskProgress.total > 0)
+                  Text(
+                    '${taskProgress.percent}',
+                    style: const TextStyle(fontSize: 8),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return IconButton(
+      tooltip: isDownloaded ? 'Xóa bản tải offline' : 'Tải truyện offline',
+      onPressed: _downloadStory,
+      icon: Icon(
+        isDownloaded ? Icons.download_done : Icons.download_outlined,
+        color: isDownloaded ? Colors.green : null,
+      ),
+    );
+  }
+
+  Widget _buildDownloadProgressBanner() {
+    final progress = _downloadNotifier.value;
+    final hasStatus = downloadStatus.isNotEmpty;
+
+    if (!downloadLoading && !hasStatus) {
+      return const SizedBox.shrink();
+    }
+
+    return Material(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    downloadStatus.isEmpty
+                        ? 'Đang tải truyện...'
+                        : downloadStatus,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (downloadLoading && progress.total > 0)
+                  Text('${progress.completed}/${progress.total}'),
+                if (downloadLoading && progress.total > 0)
+                  const SizedBox(width: 8),
+                if (downloadLoading && progress.total > 0)
+                  Text('${progress.percent}%'),
+              ],
+            ),
+            if (downloadLoading) ...[
+              const SizedBox(height: 8),
+              LinearProgressIndicator(
+                value: progress.total > 0 ? progress.progress : null,
+              ),
+            ],
+            if (downloadLoading && progress.current.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Đang xử lý: ${progress.current}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+            if (progress.error != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                progress.error!,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.error,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (storyLoading) {
       return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
+        body: Center(child: CircularProgressIndicator()),
       );
     }
 
@@ -670,15 +894,14 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       appBar: AppBar(
         title: Text(story['title']?.toString() ?? ''),
         actions: [
+          _buildDownloadButton(),
           IconButton(
             tooltip: isSaved ? 'Bỏ yêu thích' : 'Thêm vào yêu thích',
             icon: bookmarkLoading
                 ? const SizedBox(
               width: 20,
               height: 20,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-              ),
+              child: CircularProgressIndicator(strokeWidth: 2),
             )
                 : Icon(
               isSaved ? Icons.favorite : Icons.favorite_border,
@@ -698,15 +921,9 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
 
               try {
                 if (isSaved) {
-                  await Bookmark().unsaveStory(
-                    user!.id,
-                    widget.storyId,
-                  );
+                  await Bookmark().unsaveStory(user!.id, widget.storyId);
                 } else {
-                  await Bookmark().saveStory(
-                    user!.id,
-                    widget.storyId,
-                  );
+                  await Bookmark().saveStory(user!.id, widget.storyId);
                 }
 
                 if (!mounted) return;
@@ -736,20 +953,28 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
           ),
         ],
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final isWindows = !kIsWeb &&
-              defaultTargetPlatform == TargetPlatform.windows;
+      body: Column(
+        children: [
+          _buildDownloadProgressBanner(),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isWindows =
+                    !kIsWeb &&
+                        defaultTargetPlatform == TargetPlatform.windows;
 
-          final useTwoColumns =
-              isWindows && constraints.maxWidth >= 900;
+                final useTwoColumns =
+                    isWindows && constraints.maxWidth >= 900;
 
-          if (useTwoColumns) {
-            return _buildWindowsLayout();
-          }
+                if (useTwoColumns) {
+                  return _buildWindowsLayout();
+                }
 
-          return _buildMobileLayout();
-        },
+                return _buildMobileLayout();
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
