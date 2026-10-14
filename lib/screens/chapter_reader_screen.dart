@@ -871,16 +871,6 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
               icon: const Icon(Icons.menu_book),
             ),
             const Divider(),
-            IconButton(
-              tooltip: 'Cuộn lên (↑)',
-              onPressed: () => _scrollBy(-400),
-              icon: const Icon(Icons.keyboard_arrow_up),
-            ),
-            IconButton(
-              tooltip: 'Cuộn xuống (↓)',
-              onPressed: () => _scrollBy(400),
-              icon: const Icon(Icons.keyboard_arrow_down),
-            ),
             const Spacer(),
             RotatedBox(
               quarterTurns: 3,
