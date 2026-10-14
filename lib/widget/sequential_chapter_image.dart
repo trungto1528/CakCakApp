@@ -7,12 +7,14 @@ class SequentialChapterImage extends StatefulWidget {
   final String imageUrl;
   final bool shouldLoad;
   final VoidCallback? onLoadFinished;
+  final double? width;
 
   const SequentialChapterImage({
     super.key,
     required this.imageUrl,
     this.shouldLoad = true,
     this.onLoadFinished,
+    this.width,
   });
 
   @override
@@ -35,10 +37,10 @@ class _SequentialChapterImageState extends State<SequentialChapterImage> {
   }
 
   Widget _placeholder() {
-    return const SizedBox(
-      width: double.infinity,
+    return SizedBox(
+      width: widget.width,
       height: 220,
-      child: Center(
+      child: const Center(
         child: CircularProgressIndicator(),
       ),
     );
@@ -46,7 +48,7 @@ class _SequentialChapterImageState extends State<SequentialChapterImage> {
 
   Widget _errorWidget() {
     return SizedBox(
-      width: double.infinity,
+      width: widget.width,
       height: 160,
       child: Center(
         child: Column(
@@ -77,15 +79,23 @@ class _SequentialChapterImageState extends State<SequentialChapterImage> {
   }
 
   @override
+  void didUpdateWidget(covariant SequentialChapterImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.imageUrl != widget.imageUrl) {
+      _notifiedFinished = false;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // Chưa đến giai đoạn tải ảnh này.
     if (!widget.shouldLoad) {
       return _placeholder();
     }
 
     return CachedNetworkImage(
       imageUrl: widget.imageUrl,
-      width: double.infinity,
+      width: widget.width,
       fit: BoxFit.fitWidth,
       cacheManager: ChapterCacheManager.instance,
       placeholder: (context, url) => _placeholder(),
@@ -94,13 +104,11 @@ class _SequentialChapterImageState extends State<SequentialChapterImage> {
 
         return Image(
           image: imageProvider,
-          width: double.infinity,
+          width: widget.width,
           fit: BoxFit.fitWidth,
         );
       },
       errorWidget: (context, url, error) {
-        // Ảnh lỗi cũng được xem là đã hoàn tất,
-        // tránh việc 3 ảnh đầu bị kẹt ở giai đoạn chờ.
         _notifyFinished();
         return _errorWidget();
       },

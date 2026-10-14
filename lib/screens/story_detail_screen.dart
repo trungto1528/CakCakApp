@@ -1,36 +1,36 @@
 import 'dart:convert';
-import 'dart:io';
+  import 'dart:io';
 
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
-import 'package:novel_app/config/api_config.dart';
-import 'package:novel_app/offline/service/offline_entry_service.dart';
-import 'package:novel_app/offline/service/offline_mode_service.dart';
-import 'package:novel_app/offline/service/story_download_service.dart';
-import 'package:novel_app/screens/chapter_reader_screen.dart';
-import 'package:novel_app/services/bookmark.dart';
-import 'package:novel_app/services/story_fetcher.dart';
-import 'package:novel_app/widget/expand_text.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+  import 'package:cached_network_image/cached_network_image.dart';
+  import 'package:flutter/foundation.dart';
+  import 'package:flutter/material.dart';
+  import 'package:novel_app/config/api_config.dart';
+  import 'package:novel_app/offline/service/offline_entry_service.dart';
+  import 'package:novel_app/offline/service/offline_mode_service.dart';
+  import 'package:novel_app/offline/service/story_download_service.dart';
+  import 'package:novel_app/screens/chapter_reader_screen.dart';
+  import 'package:novel_app/services/bookmark.dart';
+  import 'package:novel_app/services/story_fetcher.dart';
+  import 'package:novel_app/widget/expand_text.dart';
+  import 'package:path_provider/path_provider.dart';
+  import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/User.dart';
-import 'login_screen.dart';
+  import '../models/User.dart';
+  import 'login_screen.dart';
 
-class StoryDetailScreen extends StatefulWidget {
+  class StoryDetailScreen extends StatefulWidget {
   final int storyId;
 
   const StoryDetailScreen({
-    super.key,
-    required this.storyId,
+  super.key,
+  required this.storyId,
   });
 
   @override
   State<StoryDetailScreen> createState() => _StoryDetailScreenState();
-}
+  }
 
-class _StoryDetailScreenState extends State<StoryDetailScreen> {
+  class _StoryDetailScreenState extends State<StoryDetailScreen> {
   Map<String, dynamic> story = {};
 
   User? user;
@@ -480,12 +480,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       _syncDownloadProgress();
       return;
     }
-
-    if (isDownloaded) {
-      await _showDeleteDownloadDialog();
-      return;
-    }
-
     try {
       await service.downloadStory(
         widget.storyId,
@@ -1191,19 +1185,33 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       );
     }
 
-    return IconButton(
-      tooltip: _isOffline
-          ? 'Đang ở chế độ offline'
-          : isDownloaded
-          ? 'Xóa bản tải offline'
-          : 'Tải truyện offline',
-      onPressed: _isOffline ? null : _downloadStory,
-      icon: Icon(
-        isDownloaded
-            ? Icons.download_done
-            : Icons.download_outlined,
-        color: isDownloaded ? Colors.green : null,
-      ),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Nút cập nhật truyện, chỉ hiển thị khi đã tải.
+        if (isDownloaded && !_isOffline)
+          IconButton(
+            tooltip: 'Cập nhật truyện offline',
+            onPressed: _downloadStory,
+            icon: const Icon(Icons.refresh),
+          ),
+
+        // Nút tải xuống hoặc xóa bản tải hiện tại.
+        IconButton(
+          tooltip: _isOffline
+              ? 'Đang ở chế độ offline'
+              : isDownloaded
+              ? 'Xóa bản tải offline'
+              : 'Tải truyện offline',
+          onPressed: _isOffline ? null : _downloadStory,
+          icon: Icon(
+            isDownloaded
+                ? Icons.download_done
+                : Icons.download_outlined,
+            color: isDownloaded ? Colors.green : null,
+          ),
+        ),
+      ],
     );
   }
 
