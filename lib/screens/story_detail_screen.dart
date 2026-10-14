@@ -13,9 +13,9 @@ import 'package:novel_app/services/bookmark.dart';
 import 'package:novel_app/services/story_fetcher.dart';
 import 'package:novel_app/widget/expand_text.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/User.dart';
+import '../services/app_preference.dart';
 import 'login_screen.dart';
 
 class StoryDetailScreen extends StatefulWidget {
@@ -279,7 +279,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
   // ============================================================
 
   Future<void> _loadUser() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await AppPreferences.getInstance();
     final userString = prefs.getString('user');
 
     if (!mounted) return;

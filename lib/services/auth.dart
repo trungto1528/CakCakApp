@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/api_config.dart';
+import 'app_preference.dart';
 
 class Auth {
   Future<String> login(String username, String password) async {
@@ -15,7 +16,7 @@ class Auth {
       body: jsonEncode({"username": username, "password": password}),
     );
     if (res.statusCode == 200) {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await AppPreferences.getInstance();
       await prefs.setString("user", res.body);
       return "Logged In";
     } else {

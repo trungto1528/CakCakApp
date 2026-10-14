@@ -6,11 +6,11 @@ import 'package:novel_app/config/api_config.dart';
 import 'package:novel_app/screens/story_detail_screen.dart';
 import 'package:novel_app/services/bookmark.dart';
 import 'package:novel_app/services/story_fetcher.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/Story.dart';
 import '../models/User.dart';
 import '../route_observer.dart';
+import '../services/app_preference.dart';
 
 class LibraryPage extends StatefulWidget {
   const LibraryPage({super.key});
@@ -49,7 +49,7 @@ class _LibraryPageState extends State<LibraryPage> with RouteAware {
 
   Future<void> _loadLibrary() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await AppPreferences.getInstance();
       final storedUser = prefs.getString("user");
 
       if (storedUser == null) {

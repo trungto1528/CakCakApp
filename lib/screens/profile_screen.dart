@@ -7,11 +7,11 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:novel_app/screens/user_management.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/api_config.dart';
 import '../models/User.dart';
 import '../models/app_theme_mode.dart';
+import '../services/app_preference.dart';
 import '../services/auth.dart';
 import '../offline/service/offline_mode_service.dart';
 import '../services/ota.dart';
@@ -75,7 +75,7 @@ class _ProfilePageState extends State<ProfilePage> {
     if (isOffline) return;
 
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await AppPreferences.getInstance();
       final userStr = prefs.getString('user');
 
       if (userStr == null) {
@@ -116,7 +116,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> logout() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await AppPreferences.getInstance();
     await prefs.remove('user');
 
     if (!mounted) return;
@@ -263,7 +263,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
         currentUser.avatarUrl = '/$fileName';
 
-        final prefs = await SharedPreferences.getInstance();
+        final prefs = await AppPreferences.getInstance();
         await prefs.setString(
           'user',
           jsonEncode(currentUser.toJson()),
@@ -347,7 +347,7 @@ class _ProfilePageState extends State<ProfilePage> {
       if (res.statusCode == 200) {
         currentUser.displayName = name;
 
-        final prefs = await SharedPreferences.getInstance();
+        final prefs = await AppPreferences.getInstance();
         await prefs.setString(
           'user',
           jsonEncode(currentUser.toJson()),

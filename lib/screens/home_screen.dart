@@ -12,12 +12,12 @@ import 'package:novel_app/screens/story_detail_screen.dart';
 import 'package:novel_app/services/chapter_fetcher.dart';
 import 'package:novel_app/services/story_fetcher.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/api_config.dart';
 import '../models/User.dart';
 import '../offline/service/offline_mode_service.dart';
 import '../route_observer.dart';
+import '../services/app_preference.dart';
 import '../services/auth.dart';
 
 class HomePage extends StatefulWidget {
@@ -138,7 +138,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
 
   Future<void> _loadLastRead() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await AppPreferences.getInstance();
 
       final storedUser = prefs.getString('user');
       int? storedStoryId = prefs.getInt('lastStoryId');

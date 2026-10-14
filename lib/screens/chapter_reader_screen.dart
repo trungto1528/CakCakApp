@@ -8,12 +8,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:novel_app/screens/story_detail_screen.dart';
 import 'package:novel_app/services/last_read.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/api_config.dart';
 import '../models/User.dart';
 import '../offline/service/offline_entry_service.dart';
 import '../offline/service/offline_mode_service.dart';
+import '../services/app_preference.dart';
 import '../services/chapter_fetcher.dart';
 import '../services/story_fetcher.dart';
 import '../widget/sequential_chapter_image.dart';
@@ -118,7 +118,7 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
 
   Future<void> _loadReaderSettings() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await AppPreferences.getInstance();
       final sensitivity = prefs.getDouble('reader_scroll_sensitivity') ?? 1.0;
 
       if (!mounted) return;
@@ -197,7 +197,7 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
     });
 
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await AppPreferences.getInstance();
       await prefs.setDouble('reader_scroll_sensitivity', result);
     } catch (e) {
       debugPrint('Không thể lưu độ nhạy cuộn: $e');
@@ -454,7 +454,7 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
 
   Future<void> _saveReadingHistory(int chapterId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await AppPreferences.getInstance();
       final userString = prefs.getString('user');
 
       if (userString != null) {
@@ -657,7 +657,7 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
   }
 
   Future<void> _saveLastRead(int chapterId) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await AppPreferences.getInstance();
 
     await prefs.setInt('lastStoryId', widget.storyId);
     await prefs.setInt('lastChapterId', chapterId);

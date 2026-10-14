@@ -6,11 +6,11 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../config/api_config.dart';
 import '../models/User.dart';
+import '../services/app_preference.dart';
 import '../services/chapter_fetcher.dart';
 import '../services/story_fetcher.dart';
 
@@ -138,7 +138,7 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
     setState(() => _loading = true);
 
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await AppPreferences.getInstance();
       final user = User.fromJson(jsonDecode(prefs.getString("user")!));
 
       String coverUrl = "";
@@ -182,7 +182,7 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
     setState(() => _loading = true);
 
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await AppPreferences.getInstance();
       final user = User.fromJson(jsonDecode(prefs.getString("user")!));
 
       List<Map<String, String>> content = [];

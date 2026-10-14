@@ -1,37 +1,71 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:novel_app/route_observer.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'models/app_theme_mode.dart';
-import 'screens/main_screen.dart';
-import 'platforms/windows/windows_main_screen.dart';
-import 'offline/service/offline_mode_service.dart';
+import 'package:novel_app/services/app_preference.dart';
 
-void main() async {
+import 'models/app_theme_mode.dart';
+import 'offline/service/offline_mode_service.dart';
+import 'platforms/windows/windows_main_screen.dart';
+import 'platforms/windows/windows_storage_manager.dart';
+import 'platforms/windows/windows_storage_setup_screen.dart';
+import 'screens/main_screen.dart';
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Khôi phục trạng thái Offline, mặc định là false.
+  // Windows phải cấu hình thư mục lưu trữ trước khi khởi chạy.
+  if (WindowsStorageManager.isWindows) {
+    final root = await WindowsStorageManager.loadConfiguredRoot();
+
+    if (root == null) {
+      runApp(WindowsStorageBootstrapApp(onConfigured: _launchConfiguredApp));
+      return;
+    }
+  }
+
+  await _launchConfiguredApp();
+}
+
+/// Khởi chạy ứng dụng sau khi thư mục lưu trữ đã hợp lệ.
+Future<void> _launchConfiguredApp() async {
   await OfflineModeService.initialize();
 
-  final prefs = await SharedPreferences.getInstance();
-  await OfflineModeService.initialize();
+  final prefs = await AppPreferences.getInstance();
   final index = prefs.getInt('themeMode') ?? 2;
 
-  final safeIndex =
-  index >= 0 && index < AppThemeMode.values.length ? index : 2;
+  final safeIndex = index >= 0 && index < AppThemeMode.values.length
+      ? index
+      : 2;
 
-  runApp(
-    MyApp(initialMode: AppThemeMode.values[safeIndex]),
-  );
+  runApp(MyApp(initialMode: AppThemeMode.values[safeIndex]));
+}
+
+/// Ứng dụng tạm thời chỉ hiển thị màn hình chọn thư mục trên Windows.
+class WindowsStorageBootstrapApp extends StatelessWidget {
+  final Future<void> Function() onConfigured;
+
+  const WindowsStorageBootstrapApp({super.key, required this.onConfigured});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Novel App',
+      theme: ThemeData(
+        useMaterial3: true,
+        colorSchemeSeed: Colors.blue,
+        brightness: Brightness.light,
+        scaffoldBackgroundColor: const Color(0xFFF5F5F5),
+      ),
+      home: WindowsStorageSetupScreen(onConfigured: onConfigured),
+    );
+  }
 }
 
 class MyApp extends StatefulWidget {
   final AppThemeMode initialMode;
 
-  const MyApp({
-    super.key,
-    required this.initialMode,
-  });
+  const MyApp({super.key, required this.initialMode});
 
   @override
   State<MyApp> createState() => _MyAppState();
@@ -47,7 +81,7 @@ class _MyAppState extends State<MyApp> {
   }
 
   Future<void> _saveTheme(AppThemeMode mode) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await AppPreferences.getInstance();
     await prefs.setInt('themeMode', mode.index);
   }
 
@@ -78,10 +112,7 @@ class _MyAppState extends State<MyApp> {
       );
     }
 
-    return MainScreen(
-      currentMode: _themeMode,
-      onThemeChanged: _changeTheme,
-    );
+    return MainScreen(currentMode: _themeMode, onThemeChanged: _changeTheme);
   }
 
   @override
