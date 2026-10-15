@@ -707,12 +707,15 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
         continue;
       }
 
-      result.putIfAbsent(number, () => []);
-      result[number]!.add(chapter);
+      // Nhóm theo phần nguyên của số chapter (1, 1.1, 1.2 cùng nhóm là 1)
+      // và (0, 000.1, 000.2 cùng nhóm là 0)
+      final groupKey = number.truncateToDouble();
+
+      result.putIfAbsent(groupKey, () => []);
+      result[groupKey]!.add(chapter);
     }
 
     final keys = result.keys.toList()..sort();
-
     return {for (final number in keys) number: result[number]!};
   }
 
