@@ -754,6 +754,7 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
       }
 
       final change = delta < 0 ? _zoomStep : -_zoomStep;
+      final oldZoomScale = _zoomScale;
 
       setState(() {
         _zoomScale = (_zoomScale + change)
@@ -761,10 +762,57 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
             .toDouble();
       });
 
+      // Điều chỉnh offset proportionally khi zoom thay đổi
+      // để giữ nguyên vị trí tương đối trong nội dung
+      if (_zoomScale != oldZoomScale && mounted) {
+        _adjustZoomOffsets(oldZoomScale);
+      }
+
       return;
     }
 
     _scrollByWheel(delta);
+  }
+
+  void _adjustZoomOffsets(double oldZoomScale) {
+    // Điều chỉnh horizontal offset proportionally
+    if (_horizontalScrollController.hasClients) {
+      final position = _horizontalScrollController.position;
+      final newContentWidth = _lastBaseContentWidth * _zoomScale;
+
+      final oldMax = position.maxScrollExtent;
+      final newMax = newContentWidth - _lastAvailableWidth;
+      final clampedNewMax = newMax > 0 ? newMax : 0.0;
+
+      if (oldMax > 0 && clampedNewMax > 0) {
+        final proportion = position.pixels / oldMax;
+        final newOffset = proportion * clampedNewMax;
+        _horizontalScrollController.jumpTo(
+          newOffset.clamp(0.0, clampedNewMax),
+        );
+      } else if (oldMax > 0) {
+        _horizontalScrollController.jumpTo(0.0);
+      }
+    }
+
+    // Điều chỉnh vertical offset giữ vị trí tương đối
+    if (_scrollController.hasClients) {
+      final position = _scrollController.position;
+      final oldMax = position.maxScrollExtent;
+
+      // Tính content height tương đối (số block × chiều cao ước tính)
+      final contentHeightFactor = blocks.length.toDouble() * 100.0;
+      final newMaxVertical = contentHeightFactor * (_zoomScale / oldZoomScale);
+      final clampedNewMax = newMaxVertical > oldMax ? newMaxVertical : oldMax;
+
+      if (oldMax > 0 && clampedNewMax > oldMax) {
+        final proportion = position.pixels / oldMax;
+        final newOffset = proportion * clampedNewMax;
+        _scrollController.jumpTo(
+          newOffset.clamp(0.0, clampedNewMax),
+        );
+      }
+    }
   }
 
   // ============================================================
@@ -786,7 +834,7 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
     _activatePinchScrollLock();
   }
 
-  void _handleScaleUpdate(ScaleUpdateDetails details) {
+void _handleScaleUpdate(ScaleUpdateDetails details) {
     if (!_isAndroid || details.pointerCount < 2) return;
 
     _activatePinchScrollLock();
@@ -797,8 +845,7 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
 
     if ((newZoom - _zoomScale).abs() < 0.005) return;
 
-    // Lưu tâm pinch hiện tại trước khi layout thay đổi.
-    final currentFocalPoint = details.localFocalPoint;
+    // Lưu kích thước content trước layout change
     final baseWidth = _lastBaseContentWidth;
     final availableWidth = _lastAvailableWidth;
     final startContentWidth = (baseWidth * _scaleStartZoom)
@@ -818,40 +865,45 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
     final newLeftInset =
     ((availableWidth - newContentWidth) / 2).clamp(0.0, double.infinity);
 
+    // Tính vị trí tâm zoom ban đầu đối với nội dung (sử dụng focal point gốc)
     final contentXAtStart = _scaleStartFocalPoint.dx -
         startLeftInset +
         _scaleStartHorizontalOffset;
-    final targetHorizontalOffset =
-        newLeftInset + contentXAtStart * widthScale - currentFocalPoint.dx;
-
-    // Chiều cao ảnh và phần lớn nội dung tăng theo cùng tỷ lệ với chiều rộng.
     final contentYAtStart =
         _scaleStartFocalPoint.dy + _scaleStartVerticalOffset;
+
+    // Tính offset mục tiêu để giữ focal point tại cùng vị trí trên màn hình
+    // Sử dụng _scaleStartFocalPoint (không thay đổi) để tránh jump giữa frames
+    final targetHorizontalOffset =
+        newLeftInset + contentXAtStart * widthScale - _scaleStartFocalPoint.dx;
     final targetVerticalOffset =
-        contentYAtStart * widthScale - currentFocalPoint.dy;
+        contentYAtStart * widthScale - _scaleStartFocalPoint.dy;
 
     setState(() {
       _zoomScale = newZoom;
-    });
 
-    // Chỉ điều chỉnh offset sau layout để maxScrollExtent phản ánh kích thước mới.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-
+      // Điều chỉnh offset ngay lập tức (synchronously) trong setState
+      // Để tránh lag/flicker từ addPostFrameCallback delay
       if (_horizontalScrollController.hasClients) {
         final position = _horizontalScrollController.position;
-        final target = targetHorizontalOffset
-            .clamp(0.0, position.maxScrollExtent)
-            .toDouble();
-        _horizontalScrollController.jumpTo(target);
+        final clampedTarget = targetHorizontalOffset
+            .clamp(0.0, position.maxScrollExtent);
+        _horizontalScrollController.animateTo(
+          clampedTarget,
+          duration: const Duration(milliseconds: 100),
+          curve: Curves.easeOut,
+        );
       }
 
       if (_scrollController.hasClients) {
         final position = _scrollController.position;
-        final target = targetVerticalOffset
-            .clamp(0.0, position.maxScrollExtent)
-            .toDouble();
-        _scrollController.jumpTo(target);
+        final clampedTarget = targetVerticalOffset
+            .clamp(0.0, position.maxScrollExtent);
+        _scrollController.animateTo(
+          clampedTarget,
+          duration: const Duration(milliseconds: 100),
+          curve: Curves.easeOut,
+        );
       }
     });
   }
