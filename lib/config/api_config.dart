@@ -19,4 +19,8 @@ class ApiConfig {
 
   static const String avatarImage =
       "$image/avatar";
+
+  /// Download story chapters ZIP
+  static const String downloadStory =
+      "$api/download/story";
 }
