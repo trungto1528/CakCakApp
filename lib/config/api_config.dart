@@ -1,6 +1,6 @@
 class ApiConfig {
   static const String host =
-      "http://v2.trungto.dpdns.org";
+      "http://vps212.trungto.dpdns.org";
 
   static const String api =
       "$host:7777/api";
