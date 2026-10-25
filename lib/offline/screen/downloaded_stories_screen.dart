@@ -1,11 +1,8 @@
-
 import 'dart:convert';
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:novel_app/offline/service/story_download_service.dart';
 import 'package:path_provider/path_provider.dart';
-
 class DownloadedStory {
   final int id;
   final String title;
@@ -15,7 +12,6 @@ class DownloadedStory {
   final int imageCount;
   final int sizeBytes;
   final DateTime? downloadedAt;
-
   const DownloadedStory({
     required this.id,
     required this.title,
@@ -26,52 +22,38 @@ class DownloadedStory {
     required this.sizeBytes,
     required this.downloadedAt,
   });
-
   String get formattedSize {
     if (sizeBytes < 1024) return '$sizeBytes B';
-
     final kb = sizeBytes / 1024;
     if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
-
     final mb = kb / 1024;
     if (mb < 1024) return '${mb.toStringAsFixed(1)} MB';
-
     return '${(mb / 1024).toStringAsFixed(2)} GB';
   }
 }
-
 class DownloadedStoriesScreen extends StatefulWidget {
   const DownloadedStoriesScreen({super.key});
-
   @override
   State<DownloadedStoriesScreen> createState() =>
       _DownloadedStoriesScreenState();
 }
-
 class _DownloadedStoriesScreenState extends State<DownloadedStoriesScreen> {
   List<DownloadedStory> _stories = [];
-
   bool _loading = true;
   String? _error;
   int _totalSize = 0;
-
   @override
   void initState() {
     super.initState();
     _loadDownloadedStories();
   }
-
   Future<Directory> _getOfflineRoot() async {
     final root = await getApplicationSupportDirectory();
-
     return Directory('${root.path}/offline_stories');
   }
-
   Future<int> _calculateDirectorySize(Directory directory) async {
     var total = 0;
-
     if (!await directory.exists()) return total;
-
     await for (final entity in directory.list(
       recursive: true,
       followLinks: false,
@@ -84,58 +66,43 @@ class _DownloadedStoriesScreenState extends State<DownloadedStoriesScreen> {
         }
       }
     }
-
     return total;
   }
-
   Future<List<DownloadedStory>> _scanDownloadedStories() async {
     final root = await _getOfflineRoot();
-
     if (!await root.exists()) {
       return [];
     }
-
     final result = <DownloadedStory>[];
-
     await for (final entity in root.list(followLinks: false)) {
       if (entity is! Directory) continue;
-
       final storyId = int.tryParse(
         entity.path.split(Platform.pathSeparator).last,
       );
-
       if (storyId == null) continue;
-
       final completeFile = File('${entity.path}/complete.json');
       final metadataFile = File('${entity.path}/metadata.json');
-
       // Chỉ hiển thị truyện đã có marker hoàn tất.
       if (!await completeFile.exists() ||
           !await metadataFile.exists()) {
         continue;
       }
-
       try {
         final manifestJson = jsonDecode(
           await completeFile.readAsString(),
         );
-
         final metadataJson = jsonDecode(
           await metadataFile.readAsString(),
         );
-
         if (manifestJson is! Map || metadataJson is! Map) {
           continue;
         }
-
         if (manifestJson['storyId'] != null &&
             int.tryParse(manifestJson['storyId'].toString()) != storyId) {
           continue;
         }
-
         final title = metadataJson['title']?.toString().trim();
         final author = metadataJson['author']?.toString().trim() ?? '';
-
         final images = manifestJson['images'] is List
             ? List<String>.from(
           (manifestJson['images'] as List).map(
@@ -143,34 +110,26 @@ class _DownloadedStoriesScreenState extends State<DownloadedStoriesScreen> {
           ),
         )
             : <String>[];
-
         String? coverPath;
-
         for (final image in images) {
           if (image.replaceAll('\\', '/').startsWith('cover/')) {
             final normalized = image.replaceAll(
               '/',
               Platform.pathSeparator,
             );
-
             final file = File('${entity.path}/$normalized');
-
             if (await file.exists() && await file.length() > 0) {
               coverPath = file.path;
               break;
             }
           }
         }
-
         final downloadedAtText =
         manifestJson['downloadedAt']?.toString();
-
         final downloadedAt = downloadedAtText == null
             ? null
             : DateTime.tryParse(downloadedAtText);
-
         final size = await _calculateDirectorySize(entity);
-
         result.add(
           DownloadedStory(
             id: storyId,
@@ -189,24 +148,18 @@ class _DownloadedStoriesScreenState extends State<DownloadedStoriesScreen> {
         debugPrint('Không đọc được dữ liệu truyện $storyId: $e');
       }
     }
-
     result.sort((a, b) {
       final dateA = a.downloadedAt;
       final dateB = b.downloadedAt;
-
       if (dateA == null && dateB == null) {
         return a.title.compareTo(b.title);
       }
-
       if (dateA == null) return 1;
       if (dateB == null) return -1;
-
       return dateB.compareTo(dateA);
     });
-
     return result;
   }
-
   Future<void> _loadDownloadedStories() async {
     if (mounted) {
       setState(() {
@@ -214,12 +167,9 @@ class _DownloadedStoriesScreenState extends State<DownloadedStoriesScreen> {
         _error = null;
       });
     }
-
     try {
       final stories = await _scanDownloadedStories();
-
       if (!mounted) return;
-
       setState(() {
         _stories = stories;
         _totalSize = stories.fold<int>(
@@ -230,37 +180,27 @@ class _DownloadedStoriesScreenState extends State<DownloadedStoriesScreen> {
       });
     } catch (e) {
       if (!mounted) return;
-
       setState(() {
         _error = e.toString();
         _loading = false;
       });
     }
   }
-
   String _formatDate(DateTime? date) {
     if (date == null) return 'Không rõ ngày tải';
-
     final local = date.toLocal();
-
     String twoDigits(int value) => value.toString().padLeft(2, '0');
-
     return '${twoDigits(local.day)}/${twoDigits(local.month)}/'
         '${local.year} ${twoDigits(local.hour)}:${twoDigits(local.minute)}';
   }
-
   String _formatSize(int bytes) {
     if (bytes < 1024) return '$bytes B';
-
     final kb = bytes / 1024;
     if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
-
     final mb = kb / 1024;
     if (mb < 1024) return '${mb.toStringAsFixed(1)} MB';
-
     return '${(mb / 1024).toStringAsFixed(2)} GB';
   }
-
   Future<void> _deleteStory(DownloadedStory story) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -282,33 +222,25 @@ class _DownloadedStoriesScreenState extends State<DownloadedStoriesScreen> {
         ],
       ),
     );
-
     if (confirmed != true || !mounted) return;
-
     try {
       await StoryDownloadService.instance.deleteDownloadedStory(
         story.id,
       );
-
       await _loadDownloadedStories();
-
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Đã xóa "${story.title}"')),
       );
     } catch (e) {
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Không thể xóa truyện: $e')),
       );
     }
   }
-
   Future<void> _deleteAllStories() async {
     if (_stories.isEmpty) return;
-
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -333,12 +265,9 @@ class _DownloadedStoriesScreenState extends State<DownloadedStoriesScreen> {
         ],
       ),
     );
-
     if (confirmed != true || !mounted) return;
-
     var deletedCount = 0;
     final errors = <String>[];
-
     for (final story in List<DownloadedStory>.from(_stories)) {
       try {
         await StoryDownloadService.instance.deleteDownloadedStory(
@@ -349,23 +278,17 @@ class _DownloadedStoriesScreenState extends State<DownloadedStoriesScreen> {
         errors.add('${story.title}: $e');
       }
     }
-
     await _loadDownloadedStories();
-
     if (!mounted) return;
-
     final message = errors.isEmpty
         ? 'Đã xóa $deletedCount truyện'
         : 'Đã xóa $deletedCount truyện; còn ${errors.length} truyện chưa xóa được';
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
   }
-
   Widget _buildCover(DownloadedStory story) {
     final path = story.coverPath;
-
     if (path != null) {
       return Image.file(
         File(path),
@@ -373,10 +296,8 @@ class _DownloadedStoriesScreenState extends State<DownloadedStoriesScreen> {
         errorBuilder: (_, __, ___) => _buildCoverPlaceholder(),
       );
     }
-
     return _buildCoverPlaceholder();
   }
-
   Widget _buildCoverPlaceholder() {
     return Container(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
@@ -385,7 +306,6 @@ class _DownloadedStoriesScreenState extends State<DownloadedStoriesScreen> {
       ),
     );
   }
-
   Widget _buildSummary() {
     return Card(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -422,7 +342,6 @@ class _DownloadedStoriesScreenState extends State<DownloadedStoriesScreen> {
       ),
     );
   }
-
   Widget _buildStoryCard(DownloadedStory story) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -483,12 +402,10 @@ class _DownloadedStoriesScreenState extends State<DownloadedStoriesScreen> {
       ),
     );
   }
-
   Widget _buildBody() {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
-
     if (_error != null) {
       return Center(
         child: Padding(
@@ -516,7 +433,6 @@ class _DownloadedStoriesScreenState extends State<DownloadedStoriesScreen> {
         ),
       );
     }
-
     if (_stories.isEmpty) {
       return RefreshIndicator(
         onRefresh: _loadDownloadedStories,
@@ -543,7 +459,6 @@ class _DownloadedStoriesScreenState extends State<DownloadedStoriesScreen> {
         ),
       );
     }
-
     return RefreshIndicator(
       onRefresh: _loadDownloadedStories,
       child: ListView(
@@ -556,7 +471,6 @@ class _DownloadedStoriesScreenState extends State<DownloadedStoriesScreen> {
       ),
     );
   }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(

@@ -1,91 +1,68 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
-
 import '../config/api_config.dart';
 import '../models/User.dart';
 import '../services/app_preference.dart';
 import '../services/chapter_fetcher.dart';
 import '../services/story_fetcher.dart';
-
 class StoryChapterScreen extends StatefulWidget {
   const StoryChapterScreen({super.key});
-
   @override
   State<StoryChapterScreen> createState() => _StoryChapterScreenState();
 }
-
 class ContentBlock {
   String type;
   TextEditingController? controller;
   File? imageFile;
   String? fileName;
-
   ContentBlock.text({String content = ""})
     : type = "text",
       controller = TextEditingController(text: content);
-
   ContentBlock.image(this.imageFile, this.fileName) : type = "image";
 }
-
 class _StoryChapterScreenState extends State<StoryChapterScreen>
     with TickerProviderStateMixin {
   late TabController _tabController;
-
   // STORY
   final _storyTitle = TextEditingController();
   final _author = TextEditingController();
   final _description = TextEditingController();
   File? _cover;
-
   // CHAPTER
   final _searchController = TextEditingController();
   final _chapterTitle = TextEditingController();
   final _chapterNo = TextEditingController(text: "1");
-
   int? _selectedStoryId;
   Map<String, dynamic>? _selectedStory;
-
   List<Map<String, dynamic>> _searchResults = [];
-
   Timer? _debounce;
-  bool _loading = false;
-
   final List<ContentBlock> _blocks = [ContentBlock.text()];
-  
-
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
   }
-
   // ================= SEARCH =================
   void _onSearchChanged(String value) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
-
     _debounce = Timer(const Duration(milliseconds: 300), () async {
       if (value.trim().isEmpty) {
         setState(() => _searchResults = []);
         return;
       }
-
       final results = await StoryFetcher().search(value);
-
       if (!mounted) return;
-
       setState(() {
         _searchResults = List<Map<String, dynamic>>.from(results);
       });
     });
   }
-
   void _selectStory(Map<String, dynamic> story) {
     setState(() {
       _selectedStoryId = story['id'];
@@ -94,18 +71,15 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
       _searchResults = [];
     });
   }
-
   // ================= IMAGE =================
   Future<void> _pickCover() async {
     final img = await ImagePicker().pickImage(source: ImageSource.gallery);
     if (img == null) return;
     setState(() => _cover = File(img.path));
   }
-
   Future<void> _pickImage() async {
     final img = await ImagePicker().pickImage(source: ImageSource.gallery);
     if (img == null) return;
-
     setState(() {
       _blocks.add(
         ContentBlock.image(
@@ -116,14 +90,12 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
       _blocks.add(ContentBlock.text());
     });
   }
-
   void _removeBlock(int i) {
     setState(() {
       _blocks.removeAt(i);
       if (_blocks.isEmpty) _blocks.add(ContentBlock.text());
     });
   }
-
   // ================= SUBMIT =================
   Future<void> _submitStory() async {
     if (_storyTitle.text.trim().isEmpty ||
@@ -134,20 +106,14 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
       ).showSnackBar(const SnackBar(content: Text("Nhập đầy đủ thông tin")));
       return;
     }
-
-    setState(() => _loading = true);
-
     try {
       final prefs = await AppPreferences.getInstance();
       final user = User.fromJson(jsonDecode(prefs.getString("user")!));
-
       String coverUrl = "";
-
       if (_cover != null) {
         final uploaded = await StoryFetcher().uploadCover(_cover!);
         if (uploaded != null) coverUrl = uploaded;
       }
-
       final newStory = await StoryFetcher().createStory(
         title: _storyTitle.text.trim(),
         author: _author.text.trim(),
@@ -155,38 +121,26 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
         coverUrl: coverUrl,
         userId: user.id,
       );
-
       if (newStory == null) {
         throw Exception("Tạo truyện thất bại");
       }
-
       if (!mounted) return;
-
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text("Tạo truyện thành công")));
-
       Navigator.pop(context, true);
     } catch (e) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
     }
-
-    setState(() => _loading = false);
   }
-
   Future<void> _submitChapter() async {
     if (_selectedStoryId == null) return;
-
-    setState(() => _loading = true);
-
     try {
       final prefs = await AppPreferences.getInstance();
       final user = User.fromJson(jsonDecode(prefs.getString("user")!));
-
       List<Map<String, String>> content = [];
-
       for (final b in _blocks) {
         if (b.type == "text" && b.controller!.text.trim().isNotEmpty) {
           content.add({"type": "text", "data": b.controller!.text.trim()});
@@ -197,7 +151,6 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
           }
         }
       }
-
       await ChapterFetcher().createChapter(
         storyId: _selectedStoryId!,
         title: _chapterTitle.text,
@@ -205,23 +158,17 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
         content: content,
         userId: user.id,
       );
-
       if (!mounted) return;
-
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text("Đăng chương thành công")));
-
       Navigator.pop(context);
     } catch (e) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
     }
-
-    setState(() => _loading = false);
   }
-
   // ================= UI =================
   @override
   Widget build(BuildContext context) {
@@ -242,7 +189,6 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
       ),
     );
   }
-
   // ================= TAB STORY =================
   Widget _buildStoryTab() {
     return SingleChildScrollView(
@@ -281,9 +227,7 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
               ),
             ],
           ),
-
           const SizedBox(height: 12),
-
           TextField(
             controller: _author,
             decoration: const InputDecoration(
@@ -291,9 +235,7 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
               border: OutlineInputBorder(),
             ),
           ),
-
           const SizedBox(height: 12),
-
           TextField(
             controller: _description,
             decoration: const InputDecoration(
@@ -302,9 +244,7 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
             ),
             maxLines: 3,
           ),
-
           const SizedBox(height: 20),
-
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
@@ -319,7 +259,6 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
       ),
     );
   }
-
   // ================= TAB CHAPTER =================
   Widget _buildChapterTab() {
     return SingleChildScrollView(
@@ -334,9 +273,7 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
               border: OutlineInputBorder(),
             ),
           ),
-
           const SizedBox(height: 8),
-
           if (_searchResults.isNotEmpty)
             Container(
               height: 250,
@@ -385,9 +322,7 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
                 },
               ),
             ),
-
           const SizedBox(height: 16),
-
           // SELECTED STORY
           if (_selectedStory != null) ...[
             Row(
@@ -417,9 +352,7 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
                 ),
               ],
             ),
-
             const SizedBox(height: 16),
-
             // FORM
             Row(
               children: [
@@ -446,7 +379,6 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
                 ),
               ],
             ),
-
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(8),
@@ -462,7 +394,6 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
                     itemCount: _blocks.length,
                     itemBuilder: (_, i) {
                       final b = _blocks[i];
-
                       if (b.type == "text") {
                         return TextField(
                           controller: b.controller,
@@ -473,7 +404,6 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
                           ),
                         );
                       }
-
                       return Stack(
                         children: [
                           ClipRRect(
@@ -491,9 +421,7 @@ class _StoryChapterScreenState extends State<StoryChapterScreen>
                       );
                     },
                   ),
-
                   const SizedBox(height: 40),
-
                   InkWell(
                     onTap: _pickImage,
                     child: Container(

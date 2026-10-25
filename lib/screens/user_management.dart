@@ -1,46 +1,36 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:novel_app/config/api_config.dart';
-
 import '../services/user_service.dart';
-
 class AdminUserManagerScreen extends StatefulWidget {
   final int adminId;
-
   const AdminUserManagerScreen({
     super.key,
     required this.adminId,
   });
-
   @override
   State<AdminUserManagerScreen> createState() =>
       _AdminUserManagerScreenState();
 }
-
 class _AdminUserManagerScreenState
     extends State<AdminUserManagerScreen> {
   List users = [];
   bool isLoading = true;
-
-
   @override
   void initState() {
     super.initState();
     _loadUsers();
   }
-
   Future<void> _loadUsers() async {
     try {
       final data =
       await UserFetcher().getAllUsers(widget.adminId);
-
       setState(() {
         users = data;
         isLoading = false;
       });
     } catch (e) {
       setState(() => isLoading = false);
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("$e")),
@@ -58,11 +48,8 @@ class _AdminUserManagerScreenState
         userId,
         role,
       );
-
       await _loadUsers();
-
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Đổi role thành công"),
@@ -70,22 +57,18 @@ class _AdminUserManagerScreenState
       );
     } catch (e) {
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("$e")),
       );
     }
   }
-
   Future<void> _toggleApprove(int userId) async {
     try {
       await UserFetcher().toggleApprove(
         widget.adminId,
         userId,
       );
-
       await _loadUsers();
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -101,7 +84,6 @@ class _AdminUserManagerScreenState
       }
     }
   }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -118,7 +100,6 @@ class _AdminUserManagerScreenState
           itemCount: users.length,
           itemBuilder: (_, index) {
             final user = users[index];
-
             return Card(
               margin: const EdgeInsets.symmetric(
                 horizontal: 10,
@@ -135,9 +116,7 @@ class _AdminUserManagerScreenState
                         "${ApiConfig.avatarImage}/${user['avatarUrl']}",
                       ),
                     ),
-
                     const SizedBox(width: 12),
-
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -149,22 +128,17 @@ class _AdminUserManagerScreenState
                               fontSize: 16,
                             ),
                           ),
-
                           const SizedBox(height: 4),
-
                           Text(
                             user['username'],
                             style: TextStyle(
                               color: Colors.grey.shade600,
                             ),
                           ),
-
                           const SizedBox(height: 4),
-
                           Row(
                             children: [
                               const Text("Role: "),
-
                               DropdownButton<String>(
                                 value: user['role'],
                                 underline: const SizedBox(),
@@ -194,9 +168,7 @@ class _AdminUserManagerScreenState
                         ],
                       ),
                     ),
-
                     const SizedBox(width: 8),
-
                     Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -225,15 +197,12 @@ class _AdminUserManagerScreenState
                             ),
                           ),
                         ),
-
                         const SizedBox(height: 8),
-
                         // Chính mình
                         if (user['userId'] == widget.adminId)
                           const Chip(
                             label: Text("Bản thân"),
                           )
-
                         // User thường
                         else if (user['role'] == 'USER')
                           SizedBox(
@@ -259,7 +228,6 @@ class _AdminUserManagerScreenState
                               ),
                             ),
                           )
-
                         // Admin khác
                         else
                           const Chip(

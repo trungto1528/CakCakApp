@@ -3,9 +3,7 @@ class Story {
   final String title;
   final String? coverUrl;
   final String createdByName;
-
   Story({required this.id, required this.title, this.coverUrl,required this.createdByName});
-
   factory Story.fromJson(Map<String, dynamic> json) {
     return Story(
       id: json['id'],

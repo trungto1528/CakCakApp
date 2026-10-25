@@ -2,30 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:novel_app/screens/story_detail_screen.dart';
 import '../config/api_config.dart';
 import '../services/chapter_fetcher.dart';
-
 class MyStoriesScreen extends StatefulWidget {
   final int userId;
-
   const MyStoriesScreen({super.key, required this.userId});
-
   @override
   State<MyStoriesScreen> createState() => _MyStoriesScreenState();
 }
-
 class _MyStoriesScreenState extends State<MyStoriesScreen> {
   List stories = [];
   bool isLoading = true;
-
-
-
   int? expandedIndex;
-
   @override
   void initState() {
     super.initState();
     _loadStories();
   }
-
   Color _getStatusColor(String? status) {
     switch (status) {
       case "APPROVED":
@@ -36,13 +27,11 @@ class _MyStoriesScreenState extends State<MyStoriesScreen> {
         return Colors.grey;
     }
   }
-
   Future<void> _loadStories() async {
     try {
       final data = await ChapterFetcher().getMyChapter(widget.userId);
-
       setState(() {
-        stories = data ?? [];
+        stories = data;
         isLoading = false;
       });
     } catch (e) {
@@ -50,9 +39,7 @@ class _MyStoriesScreenState extends State<MyStoriesScreen> {
       setState(() => isLoading = false);
     }
   }
-
   // ================= DELETE =================
-
   void _confirmDelete(int chapterId) {
     showDialog(
       context: context,
@@ -78,17 +65,14 @@ class _MyStoriesScreenState extends State<MyStoriesScreen> {
       ),
     );
   }
-
   Future<void> _deleteChapter(int chapterId) async {
     try {
       await ChapterFetcher().deleteChapter(chapterId, widget.userId);
-
       setState(() {
         for (var story in stories) {
           story['chapters']?.removeWhere((c) => c['id'] == chapterId);
         }
       });
-
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Đã xoá chương")),
       );
@@ -98,9 +82,7 @@ class _MyStoriesScreenState extends State<MyStoriesScreen> {
       );
     }
   }
-
   // ================= UI =================
-
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
@@ -117,7 +99,6 @@ class _MyStoriesScreenState extends State<MyStoriesScreen> {
         body: const Center(child: CircularProgressIndicator()),
       );
     }
-
     if (stories.isEmpty) {
       return Scaffold(
         appBar: AppBar(
@@ -132,7 +113,6 @@ class _MyStoriesScreenState extends State<MyStoriesScreen> {
         body: const Center(child: Text("Chưa có truyện nào")),
       );
     }
-
     return Scaffold(
       appBar: AppBar(
         title: const Text("Truyện của tôi"),
@@ -147,13 +127,10 @@ class _MyStoriesScreenState extends State<MyStoriesScreen> {
         itemCount: stories.length,
         itemBuilder: (context, index) {
           final story = stories[index];
-
           final List chapters =
               (story['chapters'] as List?)?.toList() ?? [];
-
           chapters.sort((a, b) =>
               (a['chapterNumber'] ?? 0).compareTo(b['chapterNumber'] ?? 0));
-
           return ExpansionTile(
             initiallyExpanded: expandedIndex == index,
             onExpansionChanged: (v) {
@@ -161,7 +138,6 @@ class _MyStoriesScreenState extends State<MyStoriesScreen> {
                 expandedIndex = v ? index : null;
               });
             },
-
             // ===== COVER =====
             leading: ClipRRect(
               borderRadius: BorderRadius.circular(8),
@@ -174,13 +150,11 @@ class _MyStoriesScreenState extends State<MyStoriesScreen> {
                 const Icon(Icons.book, size: 50),
               ),
             ),
-
             // ===== TITLE =====
             title: Text(
               story['title'] ?? "Không có tên",
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
-
             // ===== SUBTITLE =====
             subtitle: Row(
               children: [
@@ -208,7 +182,6 @@ class _MyStoriesScreenState extends State<MyStoriesScreen> {
                 ),
               ],
             ),
-
             // ===== CHAPTER LIST =====
             children: chapters.map<Widget>((c) {
               return ListTile(
@@ -218,7 +191,6 @@ class _MyStoriesScreenState extends State<MyStoriesScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-
                 onTap: () {
                   Navigator.push(
                     context,
@@ -229,7 +201,6 @@ class _MyStoriesScreenState extends State<MyStoriesScreen> {
                     ),
                   );
                 },
-
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -251,9 +222,7 @@ class _MyStoriesScreenState extends State<MyStoriesScreen> {
                         ),
                       ),
                     ),
-
                     const SizedBox(width: 6),
-
                     // DELETE
                     IconButton(
                       icon: const Icon(Icons.delete,

@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-
 import '../config/api_config.dart';
-
 class Bookmark {
   Future<void> saveStory(int userId, int storyId) async {
     final res = await http.post(
@@ -13,7 +11,6 @@ class Bookmark {
         "storyId": storyId,
       }),
     );
-
     if (res.statusCode != 200) {
       throw Exception("Lưu truyện thất bại");
     }
@@ -27,7 +24,6 @@ class Bookmark {
         "storyId": storyId,
       }),
     );
-
     if (res.statusCode != 200) {
       throw Exception("Bỏ lưu thất bại");
     }
@@ -36,7 +32,6 @@ class Bookmark {
     final res = await http.get(
       Uri.parse('${ApiConfig.api}/bookmarks/check?userId=$userId&storyId=$storyId'),
     );
-
     if (res.statusCode == 200) {
       return jsonDecode(res.body);
     } else {
@@ -47,7 +42,6 @@ class Bookmark {
     final res = await http.get(
       Uri.parse('${ApiConfig.api}/bookmarks/user/$userId'),
     );
-
     if (res.statusCode == 200) {
       return jsonDecode(res.body);
     } else {

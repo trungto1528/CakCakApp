@@ -1,46 +1,33 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-
 import 'windows_storage_manager.dart';
-
 class WindowsStorageSetupScreen extends StatefulWidget {
   final Future<void> Function() onConfigured;
-
   const WindowsStorageSetupScreen({super.key, required this.onConfigured});
-
   @override
   State<WindowsStorageSetupScreen> createState() =>
       _WindowsStorageSetupScreenState();
 }
-
 class _WindowsStorageSetupScreenState extends State<WindowsStorageSetupScreen> {
   bool _isSelecting = false;
   String? _errorMessage;
-
   Future<void> _selectDirectory() async {
     if (_isSelecting) return;
-
     setState(() {
       _isSelecting = true;
       _errorMessage = null;
     });
-
     try {
       final selectedPath = await FilePicker.getDirectoryPath(
         dialogTitle: 'Chọn thư mục lưu trữ dữ liệu Novel App',
       );
-
       // Người dùng đóng hộp thoại hoặc bấm Cancel.
       if (selectedPath == null) return;
-
       await WindowsStorageManager.configureRoot(selectedPath);
-
       if (!mounted) return;
-
       await widget.onConfigured();
     } catch (e) {
       if (!mounted) return;
-
       setState(() {
         _errorMessage =
             'Không thể sử dụng thư mục đã chọn.\n'
@@ -54,7 +41,6 @@ class _WindowsStorageSetupScreenState extends State<WindowsStorageSetupScreen> {
       }
     }
   }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(

@@ -1,0 +1,10 @@
+# 1. Ép OpenCode đọc tất cả các tệp/thư mục ẩn hệ thống
+!.*
+
+# 2. Nhưng PHẢI chặn ngay các thư mục rác/nặng để bảo vệ hiệu năng máy
+.git/
+node_modules/
+dist/
+build/
+.cache/
+

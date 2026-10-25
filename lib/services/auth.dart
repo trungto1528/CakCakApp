@@ -1,11 +1,7 @@
 import 'dart:convert';
-
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
-
 import '../config/api_config.dart';
 import 'app_preference.dart';
-
 class Auth {
   Future<String> login(String username, String password) async {
     final res = await http.post(
@@ -23,7 +19,6 @@ class Auth {
       return res.body;
     }
   }
-
   Future<String> register(
     String username,
     String password,
@@ -44,7 +39,6 @@ class Auth {
       return res.body;
     }
   }
-
   Future<String> changePassword(
     String username,
     String oldPass,
@@ -60,12 +54,9 @@ class Auth {
             "newPassword": newPass,
           },
         );
-
     final res = await http.post(uri);
-
     return res.body;
   }
-
   Future<String> fetchUser(int userId) async {
     final res = await http.get(
       Uri.parse("${ApiConfig.api}/auth/fetch/$userId"),
@@ -83,7 +74,6 @@ class Auth {
           "displayName": newName,
         }),
       );
-
       if (response.statusCode == 200) {
         return "OK";
       } else {

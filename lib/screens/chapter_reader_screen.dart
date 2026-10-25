@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -8,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:novel_app/screens/story_detail_screen.dart';
 import 'package:novel_app/services/last_read.dart';
-
 import '../config/api_config.dart';
 import '../models/User.dart';
 import '../offline/service/offline_entry_service.dart';
@@ -17,119 +15,89 @@ import '../services/app_preference.dart';
 import '../services/chapter_fetcher.dart';
 import '../services/story_fetcher.dart';
 import '../widget/sequential_chapter_image.dart';
-
 class ChapterReaderScreen extends StatefulWidget {
   final int chapterId;
   final int storyId;
   final String source;
-
   const ChapterReaderScreen({
     super.key,
     required this.chapterId,
     required this.storyId,
     required this.source,
   });
-
   @override
   State<ChapterReaderScreen> createState() => _ChapterReaderScreenState();
 }
-
 class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
   final ScrollController _scrollController = ScrollController();
   final ScrollController _horizontalScrollController = ScrollController();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final GlobalKey _listViewKey = GlobalKey();
   final FocusNode _keyboardFocusNode = FocusNode();
-
   // Mobile: điều khiển zoom/pan của InteractiveViewer.
   final TransformationController _transformController =
   TransformationController();
   bool _mobileZoomed = false;
   final Set<int> _activePointers = <int>{};
   Size _mobileViewport = Size.zero;
-
   Map<String, dynamic>? chapter;
   List<dynamic> blocks = [];
   List<dynamic> chapters = [];
   List<dynamic> _allChapters = [];
   List<String> _sources = [];
-
   late String currentSource;
-
   List<int> _imageIndexByBlockIndex = [];
   List<GlobalKey> _imageKeys = [];
-
   final Set<int> _finishedInitialImageIndexes = {};
-
   // Windows: trạng thái Ctrl dùng cho zoom bằng con lăn.
   bool _isCtrlZooming = false;
-
   late int currentChapterId;
   late double lastChapterNumber;
   late String lastStoryTitle;
   late String coverUrl;
   late int index;
-
   int? nextId;
   int? prevId;
-
   int _totalPages = 0;
   int _currentPage = 0;
   int _initialImageCount = 0;
-
   bool _allowRemainingImages = false;
+  bool _useOfflineImages = false;
   bool loading = true;
-
   // Chỉ sử dụng cho zoom trên Windows.
   double _zoomScale = 1.0;
   double _maxAllowedZoomScale = 2.5;
   double _scrollSensitivity = 1.0;
-
   double _lastAvailableWidth = 0.0;
   double _lastBaseContentWidth = 0.0;
-
   static const double _minZoomScale = 0.5;
   static const double _maxZoomLimit = 3.5;
   static const double _zoomStep = 0.1;
-
   bool get _isWindows =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
-
-  bool get _isAndroid =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
-
   bool get _isMobile =>
       !kIsWeb &&
           (defaultTargetPlatform == TargetPlatform.android ||
               defaultTargetPlatform == TargetPlatform.iOS);
-
   bool get _isOffline => OfflineModeService.isOffline.value;
-
   @override
   void initState() {
     super.initState();
-
     currentChapterId = widget.chapterId;
     currentSource = widget.source;
-
     _scrollController.addListener(_updateReadingProgress);
     _transformController.addListener(_onTransformChanged);
-
     _loadReaderSettings();
     _initData();
   }
-
   // ============================================================
   // CÀI ĐẶT ĐỘ NHẠY CUỘN WINDOWS
   // ============================================================
-
   Future<void> _loadReaderSettings() async {
     try {
       final prefs = await AppPreferences.getInstance();
       final sensitivity = prefs.getDouble('reader_scroll_sensitivity') ?? 1.0;
-
       if (!mounted) return;
-
       setState(() {
         _scrollSensitivity = sensitivity.clamp(0.5, 10.0).toDouble();
       });
@@ -137,10 +105,8 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
       debugPrint('Không thể tải cài đặt trình đọc: $e');
     }
   }
-
   Future<void> _showScrollSensitivityDialog() async {
     double selectedSensitivity = _scrollSensitivity;
-
     final result = await showDialog<double>(
       context: context,
       builder: (dialogContext) {
@@ -196,13 +162,10 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
         );
       },
     );
-
     if (result == null || !mounted) return;
-
     setState(() {
       _scrollSensitivity = result;
     });
-
     try {
       final prefs = await AppPreferences.getInstance();
       await prefs.setDouble('reader_scroll_sensitivity', result);
@@ -210,70 +173,52 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
       debugPrint('Không thể lưu độ nhạy cuộn: $e');
     }
   }
-
   // ============================================================
   // KHỞI TẠO TRUYỆN
   // ============================================================
-
   Future<void> _initData() async {
     if (mounted) {
       setState(() {
         loading = true;
       });
     }
-
     try {
       final storyData = await StoryFetcher().fetchStory(widget.storyId);
-
       final allChapters = storyData['chapters'] is List
           ? List<dynamic>.from(storyData['chapters'])
           : <dynamic>[];
-
       final sourceSet = <String>{};
-
       for (final item in allChapters) {
         if (item is! Map) continue;
-
         final source = item['createdBy']?.toString().trim() ?? '';
-
         if (source.isNotEmpty) {
           sourceSet.add(source);
         }
       }
-
       final sources = sourceSet.toList()
         ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-
       var initialSource = widget.source;
-
       var initialChapters = _getChaptersBySourceFrom(
         allChapters,
         initialSource,
       );
-
       if (initialChapters.isEmpty && allChapters.isNotEmpty) {
         dynamic initialChapter;
-
         for (final item in allChapters) {
           if (_chapterIdOf(item) == widget.chapterId) {
             initialChapter = item;
             break;
           }
         }
-
         if (initialChapter is Map) {
           initialSource = initialChapter['createdBy']?.toString().trim() ?? '';
         }
-
         if (initialSource.isEmpty && sources.isNotEmpty) {
           initialSource = sources.first;
         }
-
         initialChapters = _getChaptersBySourceFrom(allChapters, initialSource);
       }
-
       if (!mounted) return;
-
       setState(() {
         _allChapters = allChapters;
         _sources = sources;
@@ -282,122 +227,88 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
         lastStoryTitle = storyData['title']?.toString() ?? '';
         coverUrl = storyData['coverUrl']?.toString() ?? '';
       });
-
       var targetChapterId = widget.chapterId;
-
       final chapterExists = chapters.any(
             (item) => _chapterIdOf(item) == targetChapterId,
       );
-
       if (!chapterExists && chapters.isNotEmpty) {
         targetChapterId = _chapterIdOf(chapters.first) ?? widget.chapterId;
       }
-
       await _fetchChapter(targetChapterId);
     } catch (e) {
       if (!mounted) return;
-
       setState(() {
         loading = false;
       });
-
       debugPrint('Lỗi tải thông tin truyện: $e');
       _showError('Không thể tải thông tin truyện: $e');
     }
   }
-
   int? _chapterIdOf(dynamic item) {
     if (item is! Map) return null;
-
     final value = item['id'];
-
     if (value is int) return value;
     if (value is num) return value.toInt();
-
     return int.tryParse(value?.toString() ?? '');
   }
-
   double _parseChapterNumber(dynamic value) {
     if (value is num) return value.toDouble();
-
     return double.tryParse(value?.toString() ?? '') ?? 0;
   }
-
   List<dynamic> _getChaptersBySourceFrom(
       List<dynamic> sourceChapters,
       String source,
       ) {
     final filtered = sourceChapters.where((item) {
       if (item is! Map) return false;
-
       return (item['createdBy']?.toString().trim() ?? '') == source;
     }).toList();
-
     filtered.sort((a, b) {
       final numberA = _parseChapterNumber(a['chapterNumber']);
       final numberB = _parseChapterNumber(b['chapterNumber']);
-
       final comparison = numberA.compareTo(numberB);
-
       if (comparison != 0) return comparison;
-
       return (_chapterIdOf(a) ?? 0).compareTo(_chapterIdOf(b) ?? 0);
     });
-
     return filtered;
   }
-
   List<dynamic> _getChaptersBySource(String source) =>
       _getChaptersBySourceFrom(_allChapters, source);
-
   // ============================================================
   // ĐỔI SOURCE
   // ============================================================
-
   Future<void> _changeSource(String newSource) async {
     if (newSource == currentSource || loading) return;
-
     final filtered = _getChaptersBySource(newSource);
-
     if (filtered.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Source "$newSource" không có chapter.')),
       );
       return;
     }
-
     setState(() {
       currentSource = newSource;
       chapters = filtered;
     });
-
     _updateNextPrev();
   }
-
   // ============================================================
   // TẢI CHƯƠNG
   // ============================================================
-
   Future<void> _fetchChapter(int id) async {
     if (!mounted) return;
-
     setState(() {
       loading = true;
     });
-
     try {
       final data = await ChapterFetcher().fetchChapter(
         id,
         storyId: widget.storyId,
       );
-
       if (!mounted) return;
-
       final newBlocks = List<dynamic>.from(data['blocks'] ?? []);
       final imageIndexByBlockIndex = <int>[];
-
       var imageCount = 0;
-
       for (final block in newBlocks) {
         if (block is Map && block['type'] == 'image') {
           imageIndexByBlockIndex.add(imageCount++);
@@ -405,14 +316,23 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
           imageIndexByBlockIndex.add(-1);
         }
       }
-
+      bool useOfflineImages = false;
+      final storyAvailable =
+          await OfflineEntryService.instance.isStoryAvailable(
+        widget.storyId,
+      );
+      if (storyAvailable) {
+        useOfflineImages =
+            await OfflineEntryService.instance.isChapterAvailable(
+          widget.storyId,
+          id,
+        );
+      }
       final imageKeys = List<GlobalKey>.generate(
         imageCount,
             (_) => GlobalKey(),
       );
-
       currentChapterId = id;
-
       setState(() {
         chapter = data;
         blocks = newBlocks;
@@ -421,62 +341,47 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
         _totalPages = imageCount;
         _currentPage = imageCount > 0 ? 1 : 0;
         _initialImageCount = imageCount < 3 ? imageCount : 3;
-
         _finishedInitialImageIndexes.clear();
         _allowRemainingImages = imageCount == 0;
-
+        _useOfflineImages = useOfflineImages;
         // Reset zoom của Windows khi chuyển chương.
         _zoomScale = 1.0;
         _isCtrlZooming = false;
-
         // Reset zoom của mobile khi chuyển chương.
         _transformController.value = Matrix4.identity();
         _mobileZoomed = false;
         _activePointers.clear();
-
         lastChapterNumber = _parseChapterNumber(data['chapterNumber']);
-
         loading = false;
       });
-
       _updateNextPrev();
-
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-
         if (_scrollController.hasClients) {
           _scrollController.jumpTo(0);
         }
-
         if (_horizontalScrollController.hasClients) {
           _horizontalScrollController.jumpTo(0);
         }
-
         _keyboardFocusNode.requestFocus();
         _updateReadingProgress();
       });
-
       await _saveReadingHistory(id);
     } catch (e) {
       if (!mounted) return;
-
       setState(() {
         loading = false;
       });
-
       debugPrint('Lỗi tải chương: $e');
       _showError('Không thể tải chương: $e');
     }
   }
-
   Future<void> _saveReadingHistory(int chapterId) async {
     try {
       final prefs = await AppPreferences.getInstance();
       final userString = prefs.getString('user');
-
       if (userString != null) {
         final user = User.fromJson(jsonDecode(userString));
-
         await LastRead().updateLastRead(
           user.id,
           widget.storyId,
@@ -490,127 +395,96 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
       debugPrint('Không thể lưu lịch sử đọc: $e');
     }
   }
-
   void _showError(String message) {
     if (!mounted) return;
-
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
   }
-
   void _onInitialImageFinished(int chapterId, int imageIndex) {
     if (!mounted || chapterId != currentChapterId) return;
     if (imageIndex >= _initialImageCount) return;
-
     if (!_finishedInitialImageIndexes.add(imageIndex)) return;
-
     if (_finishedInitialImageIndexes.length >= _initialImageCount) {
       setState(() {
         _allowRemainingImages = true;
       });
     }
   }
-
   // ============================================================
   // TIẾN ĐỘ ĐỌC
   // ============================================================
-
   void _updateReadingProgress() {
     if (!_scrollController.hasClients || _totalPages == 0) {
       return;
     }
-
     final listContext = _listViewKey.currentContext;
     final listObject = listContext?.findRenderObject();
-
     if (listObject is! RenderBox || !listObject.hasSize) {
       return;
     }
-
     final viewportTop = listObject.localToGlobal(Offset.zero).dy;
-
     int? lastPageStarted;
     int? firstAvailablePage;
     int? visiblePage;
-
     for (int i = 0; i < _imageKeys.length; i++) {
       final imageObject = _imageKeys[i].currentContext?.findRenderObject();
-
       if (imageObject is! RenderBox || !imageObject.hasSize) {
         continue;
       }
-
       final imageTop = imageObject.localToGlobal(Offset.zero).dy;
       final imageBottom = imageTop + imageObject.size.height;
-
       firstAvailablePage ??= i + 1;
-
       if (imageTop <= viewportTop) {
         lastPageStarted = i + 1;
       }
-
       if (imageTop <= viewportTop && imageBottom > viewportTop) {
         visiblePage = i + 1;
         break;
       }
     }
-
     final newPage = visiblePage ?? lastPageStarted ?? firstAvailablePage ?? 1;
-
     if (newPage != _currentPage && mounted) {
       setState(() {
         _currentPage = newPage;
       });
     }
   }
-
   @override
   void dispose() {
     _scrollController.removeListener(_updateReadingProgress);
     _transformController.removeListener(_onTransformChanged);
-
     _scrollController.dispose();
     _horizontalScrollController.dispose();
     _keyboardFocusNode.dispose();
     _transformController.dispose();
-
     super.dispose();
   }
-
   // ============================================================
   // ĐIỀU HƯỚNG CHƯƠNG
   // ============================================================
-
   void _updateNextPrev() {
     index = chapters.indexWhere(
           (item) => _chapterIdOf(item) == currentChapterId,
     );
-
     if (index == -1) {
       nextId = null;
       prevId = null;
       return;
     }
-
     prevId = index > 0 ? _chapterIdOf(chapters[index - 1]) : null;
-
     nextId = index < chapters.length - 1
         ? _chapterIdOf(chapters[index + 1])
         : null;
   }
-
   Future<void> _saveLastRead(int chapterId) async {
     final prefs = await AppPreferences.getInstance();
-
     await prefs.setInt('lastStoryId', widget.storyId);
     await prefs.setInt('lastChapterId', chapterId);
     await prefs.setString('lastReadCreatedById', currentSource);
   }
-
   void _goNext() {
     if (loading) return;
-
     if (nextId != null) {
       _fetchChapter(nextId!);
     } else {
@@ -623,112 +497,84 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
       );
     }
   }
-
   void _goPrev() {
     if (loading) return;
-
     if (prevId != null) {
       _fetchChapter(prevId!);
     }
   }
-
   // ============================================================
   // CUỘN VÀ ZOOM WINDOWS
   // ============================================================
-
   void _scrollBy(double offset) {
     if (!_scrollController.hasClients) return;
-
     final position = _scrollController.position;
     final adjustedOffset = _isWindows ? offset * _scrollSensitivity : offset;
-
     final target = (_scrollController.offset + adjustedOffset)
         .clamp(0.0, position.maxScrollExtent)
         .toDouble();
-
     _scrollController.animateTo(
       target,
       duration: const Duration(milliseconds: 160),
       curve: Curves.easeOut,
     );
   }
-
   // Cuộn chuột bình thường trên Windows.
   void _scrollByWheel(double delta) {
     if (!_isWindows || !_scrollController.hasClients) return;
-
     if (HardwareKeyboard.instance.isControlPressed) return;
-
     final position = _scrollController.position;
     final adjustedDelta = delta * _scrollSensitivity;
-
     final target = (_scrollController.offset + adjustedDelta)
         .clamp(0.0, position.maxScrollExtent)
         .toDouble();
-
     _scrollController.animateTo(
       target,
       duration: const Duration(milliseconds: 100),
       curve: Curves.linear,
     );
   }
-
   // Chỉ Ctrl + lăn chuột mới zoom trên Windows.
   void _handlePointerSignal(PointerSignalEvent event) {
     if (!_isWindows || event is! PointerScrollEvent) return;
-
     final delta = event.scrollDelta.dy;
     if (delta == 0) return;
-
     final ctrlPressed = HardwareKeyboard.instance.isControlPressed;
-
     if (!ctrlPressed) {
       if (_isCtrlZooming && mounted) {
         setState(() {
           _isCtrlZooming = false;
         });
       }
-
       _scrollByWheel(delta);
       return;
     }
-
     if (!_isCtrlZooming && mounted) {
       setState(() {
         _isCtrlZooming = true;
       });
     }
-
     final change = delta < 0 ? _zoomStep : -_zoomStep;
-
     final oldZoomScale = _zoomScale;
-
     final newZoomScale = (_zoomScale + change)
         .clamp(_minZoomScale, _maxAllowedZoomScale)
         .toDouble();
-
     if (newZoomScale == oldZoomScale) return;
-
     setState(() {
       _zoomScale = newZoomScale;
     });
-
     _adjustZoomOffsets(oldZoomScale);
   }
-
   void _adjustZoomOffsets(double oldZoomScale) {
     if (_horizontalScrollController.hasClients) {
       final position = _horizontalScrollController.position;
       final newContentWidth = _lastBaseContentWidth * _zoomScale;
-
       final oldMax = position.maxScrollExtent;
       final newMax = newContentWidth - _lastAvailableWidth;
       final clampedNewMax = newMax > 0 ? newMax : 0.0;
-
       if (oldMax > 0 && clampedNewMax > 0) {
         final proportion = position.pixels / oldMax;
         final newOffset = proportion * clampedNewMax;
-
         _horizontalScrollController.jumpTo(
           newOffset.clamp(0.0, clampedNewMax).toDouble(),
         );
@@ -736,62 +582,47 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
         _horizontalScrollController.jumpTo(0.0);
       }
     }
-
     if (_scrollController.hasClients) {
       final position = _scrollController.position;
       final oldMax = position.maxScrollExtent;
-
       final contentHeightFactor = blocks.length * 100.0;
       final newMaxVertical = contentHeightFactor * (_zoomScale / oldZoomScale);
-
       final clampedNewMax = newMaxVertical > oldMax ? newMaxVertical : oldMax;
-
       if (oldMax > 0 && clampedNewMax > oldMax) {
         final proportion = position.pixels / oldMax;
         final newOffset = proportion * clampedNewMax;
-
         _scrollController.jumpTo(
           newOffset.clamp(0.0, clampedNewMax).toDouble(),
         );
       }
     }
   }
-
   // ============================================================
   // ZOOM VÀ KÉO TỰ DO TRÊN MOBILE
   // ============================================================
-
   void _onTransformChanged() {
     final zoomed = _transformController.value.getMaxScaleOnAxis() > 1.01;
-
     if (zoomed != _mobileZoomed && mounted) {
       setState(() => _mobileZoomed = zoomed);
     }
   }
-
   // Kéo 1 ngón khi đang zoom trên mobile: pan tự do cả 2 hướng.
   void _handleMobilePointerMove(PointerMoveEvent event) {
     if (!_isMobile || !_mobileZoomed || _activePointers.length != 1) return;
-
     final size = _mobileViewport;
     if (size.isEmpty) return;
-
     final matrix = _transformController.value.clone();
     final scale = matrix.getMaxScaleOnAxis();
     final translation = matrix.getTranslation();
-
     final minX = size.width - size.width * scale;
     final minY = size.height - size.height * scale;
-
     // Ngang: dịch khung nhìn.
     final newX = (translation.x + event.delta.dx).clamp(minX, 0.0).toDouble();
-
     // Dọc: dịch khung nhìn trước, phần dư thì cuộn danh sách.
     final dy = event.delta.dy;
     final desiredY = translation.y + dy;
     final newY = desiredY.clamp(minY, 0.0).toDouble();
     final leftover = desiredY - newY; // phần vượt biên
-
     if (leftover != 0 && _scrollController.hasClients) {
       final pos = _scrollController.position;
       final target = (_scrollController.offset - leftover / scale)
@@ -799,73 +630,57 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
           .toDouble();
       _scrollController.jumpTo(target);
     }
-
     matrix.setTranslationRaw(newX, newY, 0);
     _transformController.value = matrix;
   }
-
   // ============================================================
   // BÀN PHÍM WINDOWS
   // ============================================================
-
   KeyEventResult _handleKeyboardEvent(FocusNode node, KeyEvent event) {
     if (_isWindows &&
         (event.logicalKey == LogicalKeyboardKey.controlLeft ||
             event.logicalKey == LogicalKeyboardKey.controlRight)) {
       final isPressed = event is KeyDownEvent || event is KeyRepeatEvent;
-
       if (_isCtrlZooming != isPressed && mounted) {
         setState(() {
           _isCtrlZooming = isPressed;
         });
       }
-
       return KeyEventResult.handled;
     }
-
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
-
     switch (event.logicalKey) {
       case LogicalKeyboardKey.arrowUp:
         _scrollBy(-100);
         return KeyEventResult.handled;
-
       case LogicalKeyboardKey.arrowDown:
         _scrollBy(100);
         return KeyEventResult.handled;
-
       case LogicalKeyboardKey.arrowLeft:
         if (event is KeyDownEvent) _goPrev();
         return KeyEventResult.handled;
-
       case LogicalKeyboardKey.arrowRight:
         if (event is KeyDownEvent) _goNext();
         return KeyEventResult.handled;
-
       default:
         return KeyEventResult.ignored;
     }
   }
-
   void _handleFocusChange(bool hasFocus) {
     if (hasFocus) return;
-
     if (_isCtrlZooming && mounted) {
       setState(() {
         _isCtrlZooming = false;
       });
     }
   }
-
   // ============================================================
   // SIDEBAR WINDOWS
   // ============================================================
-
   Widget _buildWindowsSidebar() {
     final colorScheme = Theme.of(context).colorScheme;
-
     return Container(
       width: 64,
       color: colorScheme.surfaceContainer,
@@ -911,11 +726,9 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
       ),
     );
   }
-
   // ============================================================
   // ẢNH BÌA
   // ============================================================
-
   Widget _buildCoverImage() {
     if (_isOffline) {
       return FutureBuilder<File?>(
@@ -931,11 +744,8 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
               child: Center(child: CircularProgressIndicator()),
             );
           }
-
           final file = snapshot.data;
-
           if (file == null) return _coverPlaceholder();
-
           return Image.file(
             file,
             width: 80,
@@ -946,7 +756,6 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
         },
       );
     }
-
     return CachedNetworkImage(
       imageUrl: '${ApiConfig.coverImage}/$coverUrl',
       width: 80,
@@ -955,15 +764,12 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
       errorWidget: (_, __, ___) => _coverPlaceholder(),
     );
   }
-
   Widget _coverPlaceholder() {
     return const SizedBox(width: 80, height: 110, child: Icon(Icons.book));
   }
-
   // ============================================================
   // NỘI DUNG CHƯƠNG
   // ============================================================
-
   Widget buildBlock(
       dynamic block,
       int blockIndex,
@@ -971,7 +777,6 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
       double contentWidth,
       ) {
     if (block is! Map) return const SizedBox.shrink();
-
     if (block['type'] == 'text') {
       return Padding(
         padding: EdgeInsets.symmetric(vertical: 8, horizontal: 16 * zoomScale),
@@ -981,43 +786,34 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
         ),
       );
     }
-
     if (block['type'] == 'image') {
       final imageIndex = _imageIndexByBlockIndex[blockIndex];
-
       if (imageIndex < 0 || imageIndex >= _imageKeys.length) {
         return const SizedBox.shrink();
       }
-
       final imageName = block['data']?.toString() ?? '';
-
       final shouldLoad =
           imageIndex < _initialImageCount || _allowRemainingImages;
-
       final image = _ReaderChapterImage(
         key: _imageKeys[imageIndex],
         storyId: widget.storyId,
         imageName: imageName,
         imageUrl: '${ApiConfig.chapterImage}/$imageName',
-        offline: _isOffline,
+        offline: _useOfflineImages,
         shouldLoad: shouldLoad,
         width: contentWidth,
         onLoadFinished: imageIndex < _initialImageCount
             ? () => _onInitialImageFinished(currentChapterId, imageIndex)
             : null,
       );
-
       final isFirstImage = imageIndex == 0;
       final isLastImage = imageIndex == _totalPages - 1;
-
       if (!isFirstImage && !isLastImage) {
         return image;
       }
-
       return LayoutBuilder(
         builder: (context, constraints) {
           final edgeWidth = constraints.maxWidth * 0.2;
-
           return Stack(
             children: [
               image,
@@ -1050,40 +846,31 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
         },
       );
     }
-
     return const SizedBox.shrink();
   }
-
   Widget _buildChapterContent() {
     return LayoutBuilder(
       builder: (context, constraints) {
         final availableWidth = constraints.maxWidth;
         final availableHeight = constraints.maxHeight;
-
         final desiredWidth = (availableHeight * 0.7)
             .clamp(320.0, 900.0)
             .toDouble();
-
         final baseContentWidth = desiredWidth < availableWidth
             ? desiredWidth
             : availableWidth;
-
         _lastAvailableWidth = availableWidth;
         _lastBaseContentWidth = baseContentWidth;
-
         final effectiveZoom = _isWindows ? _zoomScale : 1.0;
-
         if (_isWindows) {
           _maxAllowedZoomScale =
               (baseContentWidth > 0 ? availableWidth / baseContentWidth : 1.0)
                   .clamp(1.0, _maxZoomLimit)
                   .toDouble();
         }
-
         final contentWidth = (baseContentWidth * effectiveZoom)
             .clamp(1.0, 2500.0)
             .toDouble();
-
         return SizedBox(
           width: availableWidth,
           height: availableHeight,
@@ -1135,14 +922,11 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
       },
     );
   }
-
   // ============================================================
   // VÙNG ĐỌC THEO NỀN TẢNG
   // ============================================================
-
   Widget _buildReaderBody() {
     final content = _buildChapterContent();
-
     if (_isWindows) {
       return Listener(
         behavior: HitTestBehavior.translucent,
@@ -1150,12 +934,10 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
         child: content,
       );
     }
-
     if (_isMobile) {
       return LayoutBuilder(
         builder: (context, constraints) {
           _mobileViewport = Size(constraints.maxWidth, constraints.maxHeight);
-
           return Listener(
             behavior: HitTestBehavior.opaque,
             onPointerDown: (e) => _activePointers.add(e.pointer),
@@ -1184,14 +966,11 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
         },
       );
     }
-
     return content;
   }
-
   // ============================================================
   // THANH ĐIỀU HƯỚNG DƯỚI
   // ============================================================
-
   Widget _buildBottomNavigationBar() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -1225,18 +1004,14 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
       ),
     );
   }
-
   // ============================================================
   // CHỌN SOURCE
   // ============================================================
-
   Widget _buildSourceSelector() {
     if (_sources.isEmpty) return const SizedBox.shrink();
-
     final selectedSource = _sources.contains(currentSource)
         ? currentSource
         : _sources.first;
-
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
       child: Column(
@@ -1257,7 +1032,6 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
             ),
             items: _sources.map((source) {
               final count = _getChaptersBySource(source).length;
-
               return DropdownMenuItem<String>(
                 value: source,
                 child: Text(
@@ -1277,11 +1051,9 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
       ),
     );
   }
-
   // ============================================================
   // GIAO DIỆN
   // ============================================================
-
   @override
   Widget build(BuildContext context) {
     if (chapter == null) {
@@ -1305,7 +1077,6 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
         ),
       );
     }
-
     return Scaffold(
       key: _scaffoldKey,
       drawer: Drawer(
@@ -1399,7 +1170,6 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
                     final c = chapters[chapterIndex];
                     final chapterId = _chapterIdOf(c);
                     final isCurrent = chapterId == currentChapterId;
-
                     return Material(
                       color: isCurrent
                           ? Theme.of(context).colorScheme.primary
@@ -1526,11 +1296,9 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
     );
   }
 }
-
 // ============================================================
 // WIDGET ẢNH CHƯƠNG HỖ TRỢ OFFLINE
 // ============================================================
-
 class _ReaderChapterImage extends StatefulWidget {
   final int storyId;
   final String imageName;
@@ -1539,7 +1307,6 @@ class _ReaderChapterImage extends StatefulWidget {
   final bool shouldLoad;
   final double width;
   final VoidCallback? onLoadFinished;
-
   const _ReaderChapterImage({
     super.key,
     required this.storyId,
@@ -1550,21 +1317,17 @@ class _ReaderChapterImage extends StatefulWidget {
     required this.width,
     this.onLoadFinished,
   });
-
   @override
   State<_ReaderChapterImage> createState() => _ReaderChapterImageState();
 }
-
 class _ReaderChapterImageState extends State<_ReaderChapterImage> {
   File? _localFile;
   bool _loadingLocalFile = false;
   bool _localLoadStarted = false;
   bool _notifiedFinished = false;
-
   @override
   void didUpdateWidget(covariant _ReaderChapterImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-
     if (oldWidget.imageName != widget.imageName ||
         oldWidget.storyId != widget.storyId ||
         oldWidget.offline != widget.offline) {
@@ -1574,54 +1337,40 @@ class _ReaderChapterImageState extends State<_ReaderChapterImage> {
       _notifiedFinished = false;
     }
   }
-
   void _notifyFinished() {
     if (_notifiedFinished) return;
-
     _notifiedFinished = true;
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         widget.onLoadFinished?.call();
       }
     });
   }
-
   Future<void> _loadLocalFile() async {
     if (_localLoadStarted || !widget.shouldLoad) return;
-
     _localLoadStarted = true;
     _loadingLocalFile = true;
-
     try {
       final filename = widget.imageName.replaceAll('\\', '/').split('/').last;
-
       final file = await OfflineEntryService.instance.getImage(
         widget.storyId,
         'chapter/$filename',
       );
-
       if (!mounted) return;
-
       setState(() {
         _localFile = file;
         _loadingLocalFile = false;
       });
-
       _notifyFinished();
     } catch (e) {
       debugPrint('Lỗi đọc ảnh Offline: $e');
-
       if (!mounted) return;
-
       setState(() {
         _loadingLocalFile = false;
       });
-
       _notifyFinished();
     }
   }
-
   Widget _placeholder() {
     return SizedBox(
       width: widget.width,
@@ -1629,7 +1378,6 @@ class _ReaderChapterImageState extends State<_ReaderChapterImage> {
       child: const Center(child: CircularProgressIndicator()),
     );
   }
-
   Widget _errorWidget() {
     return SizedBox(
       width: widget.width,
@@ -1663,13 +1411,11 @@ class _ReaderChapterImageState extends State<_ReaderChapterImage> {
       ),
     );
   }
-
   @override
   Widget build(BuildContext context) {
     if (!widget.shouldLoad) {
       return _placeholder();
     }
-
     if (!widget.offline) {
       return SequentialChapterImage(
         imageUrl: widget.imageUrl,
@@ -1678,23 +1424,18 @@ class _ReaderChapterImageState extends State<_ReaderChapterImage> {
         onLoadFinished: widget.onLoadFinished,
       );
     }
-
     if (!_localLoadStarted) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _loadLocalFile();
       });
     }
-
     if (_loadingLocalFile || !_localLoadStarted) {
       return _placeholder();
     }
-
     final file = _localFile;
-
     if (file == null) {
       return _errorWidget();
     }
-
     return Image.file(
       file,
       width: widget.width,
@@ -1704,7 +1445,6 @@ class _ReaderChapterImageState extends State<_ReaderChapterImage> {
         if (frame != null || wasSynchronouslyLoaded) {
           _notifyFinished();
         }
-
         return child;
       },
     );

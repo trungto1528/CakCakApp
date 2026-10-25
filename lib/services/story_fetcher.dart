@@ -1,4 +1,3 @@
-
 import 'dart:convert';
 import 'dart:io';
 
@@ -10,21 +9,16 @@ import 'package:novel_app/offline/service/offline_mode_service.dart';
 
 class StoryFetcher {
   String _storyCacheKey(int storyId) => 'story_$storyId';
-
   static const String _latestStoriesCacheKey = 'latest_stories';
 
   /// Đọc metadata truyện từ đầu mối Offline.
   Future<Map<String, dynamic>?> _readOfflineStory(int storyId) async {
     final story = await OfflineEntryService.instance.getStory(storyId);
-
     if (story == null) return null;
-
     final result = Map<String, dynamic>.from(story);
-
     if (result['chapters'] is! List) {
       result['chapters'] = <dynamic>[];
     }
-
     return result;
   }
 
@@ -32,71 +26,51 @@ class StoryFetcher {
   Future<Map<String, dynamic>> fetchStory(int storyId) async {
     if (OfflineModeService.isOffline.value) {
       final story = await _readOfflineStory(storyId);
-
       if (story != null) return story;
-
       throw Exception('Truyện chưa được tải đầy đủ để đọc Offline.');
     }
-
     try {
       final response = await http.get(
         Uri.parse('${ApiConfig.api}/stories/fetch/$storyId'),
       );
-
       if (response.statusCode != 200) {
-        throw Exception(
-          'Failed to fetch story: HTTP ${response.statusCode}',
-        );
+        throw Exception('Failed to fetch story: HTTP ${response.statusCode}');
       }
-
       final decoded = jsonDecode(utf8.decode(response.bodyBytes));
-
       if (decoded is! Map) {
         throw Exception('Dữ liệu truyện không hợp lệ.');
       }
-
       final data = Map<String, dynamic>.from(decoded);
-
       await OfflineDataService.saveJson(_storyCacheKey(storyId), data);
-
       return data;
     } catch (_) {
       // Khi lỗi mạng, ưu tiên package Offline đã tải.
       final offlineStory = await _readOfflineStory(storyId);
-
       if (offlineStory != null) return offlineStory;
-
       // Cuối cùng mới dùng cache JSON thông thường.
-      final cached = await OfflineDataService.readJson(
-        _storyCacheKey(storyId),
-      );
-
+      final cached = await OfflineDataService.readJson(_storyCacheKey(storyId));
       if (cached is Map) {
         return Map<String, dynamic>.from(cached);
       }
-
       rethrow;
     }
   }
 
   /// Lấy thông tin truyện dành cho quản trị viên.
   Future<Map<String, dynamic>?> fetchStoryAdmin(
-      int storyId,
-      int adminId,
-      ) async {
+    int storyId,
+    int adminId,
+  ) async {
     final res = await http.get(
       Uri.parse('${ApiConfig.api}/stories/$storyId/admin'),
       headers: {'userId': adminId.toString()},
     );
-
     if (res.statusCode == 200) {
       final data = jsonDecode(utf8.decode(res.bodyBytes));
-
       if (data is Map) {
         return Map<String, dynamic>.from(data);
       }
     }
-
     return null;
   }
 
@@ -106,15 +80,11 @@ class StoryFetcher {
       Uri.parse('${ApiConfig.api}/stories/all'),
       headers: {'userId': adminId.toString()},
     );
-
     if (res.statusCode == 200) {
       final data = jsonDecode(utf8.decode(res.bodyBytes));
-
       if (data is List) return data;
-
       throw Exception('Dữ liệu danh sách truyện không hợp lệ.');
     }
-
     throw Exception('Failed to load stories');
   }
 
@@ -126,21 +96,15 @@ class StoryFetcher {
     if (OfflineModeService.isOffline.value) {
       return OfflineEntryService.instance.searchStories(keyword);
     }
-
-    final uri = Uri.parse('${ApiConfig.api}/stories/search').replace(
-      queryParameters: {'keyword': keyword},
-    );
-
+    final uri = Uri.parse(
+      '${ApiConfig.api}/stories/search',
+    ).replace(queryParameters: {'keyword': keyword});
     final res = await http.get(uri);
-
     if (res.statusCode == 200) {
       final data = jsonDecode(utf8.decode(res.bodyBytes));
-
       if (data is List) return data;
-
       throw Exception('Dữ liệu tìm kiếm không hợp lệ.');
     }
-
     throw Exception('Search failed');
   }
 
@@ -148,28 +112,21 @@ class StoryFetcher {
   Future<Map<String, dynamic>> searchLittle(int storyId) async {
     if (OfflineModeService.isOffline.value) {
       final story = await _readOfflineStory(storyId);
-
       if (story != null) return story;
-
       throw Exception('Truyện chưa được tải để đọc Offline.');
     }
-
     final res = await http.get(
       Uri.parse('${ApiConfig.api}/stories/little?storyId=$storyId'),
     );
-
     if (res.statusCode == 200) {
       final data = jsonDecode(utf8.decode(res.bodyBytes));
-
       if (data is List && data.isNotEmpty && data.first is Map) {
         return Map<String, dynamic>.from(data.first);
       }
-
       if (data is Map) {
         return Map<String, dynamic>.from(data);
       }
     }
-
     throw Exception('No story found');
   }
 
@@ -194,15 +151,12 @@ class StoryFetcher {
         'coverUrl': coverUrl,
       }),
     );
-
     if (res.statusCode == 200 || res.statusCode == 201) {
       final data = jsonDecode(utf8.decode(res.bodyBytes));
-
       if (data is Map) {
         return Map<String, dynamic>.from(data);
       }
     }
-
     return null;
   }
 
@@ -212,7 +166,6 @@ class StoryFetcher {
       Uri.parse('${ApiConfig.api}/stories/$storyId/approve'),
       headers: {'userId': adminId.toString()},
     );
-
     if (res.statusCode != 200) {
       throw Exception('Approve failed');
     }
@@ -224,7 +177,6 @@ class StoryFetcher {
       Uri.parse('${ApiConfig.api}/stories/$storyId/reject'),
       headers: {'userId': adminId.toString()},
     );
-
     if (res.statusCode != 200) {
       throw Exception('Reject failed');
     }
@@ -236,11 +188,9 @@ class StoryFetcher {
       Uri.parse('${ApiConfig.api}/stories/$storyId'),
       headers: {'userId': userId.toString()},
     );
-
     if (res.statusCode != 200) {
       throw Exception('Delete failed');
     }
-
     await OfflineDataService.deleteData(_storyCacheKey(storyId));
   }
 
@@ -251,69 +201,43 @@ class StoryFetcher {
         'POST',
         Uri.parse('${ApiConfig.api}/stories/upload-cover'),
       );
-
-      request.files.add(
-        await http.MultipartFile.fromPath('file', file.path),
-      );
-
+      request.files.add(await http.MultipartFile.fromPath('file', file.path));
       final response = await request.send();
       final result = await response.stream.bytesToString();
-
       if (response.statusCode == 200) {
         return result;
       }
     } catch (e) {
       print('Upload cover error: $e');
     }
-
     return null;
   }
-
   /// Lấy trang truyện với pagination.
   /// Lấy một trang truyện và metadata phân trang từ backend.
-  Future<Map<String, dynamic>> fetchStoriesPage(
-      int page,
-      int limit,
-      ) async {
+  Future<Map<String, dynamic>> fetchStoriesPage(int page, int limit) async {
     final uri = Uri.parse('${ApiConfig.api}/stories/page').replace(
-      queryParameters: {
-        'page': page.toString(),
-        'limit': limit.toString(),
-      },
+      queryParameters: {'page': page.toString(), 'limit': limit.toString()},
     );
-
     final res = await http.get(uri);
-
     if (res.statusCode != 200) {
-      throw Exception(
-        'Không thể tải trang truyện: HTTP ${res.statusCode}',
-      );
+      throw Exception('Không thể tải trang truyện: HTTP ${res.statusCode}');
     }
-
     final decoded = jsonDecode(utf8.decode(res.bodyBytes));
-
     if (decoded is! Map) {
       throw Exception('Dữ liệu phân trang không hợp lệ.');
     }
-
     final data = Map<String, dynamic>.from(decoded);
     final rawStories = data['stories'];
-
     if (rawStories is! List) {
       throw Exception('Backend không trả về danh sách stories hợp lệ.');
     }
-
     return {
       'stories': rawStories
           .whereType<Map>()
           .map((item) => Map<String, dynamic>.from(item))
           .toList(),
-      'page': data['page'] is num
-          ? (data['page'] as num).toInt()
-          : page,
-      'limit': data['limit'] is num
-          ? (data['limit'] as num).toInt()
-          : limit,
+      'page': data['page'] is num ? (data['page'] as num).toInt() : page,
+      'limit': data['limit'] is num ? (data['limit'] as num).toInt() : limit,
       'totalElements': data['totalElements'],
       'totalPages': data['totalPages'],
       'hasNext': data['hasNext'] == true,
@@ -327,52 +251,53 @@ class StoryFetcher {
   /// Đây là danh sách cache chung, không phải danh sách package đã tải.
   Future<List<dynamic>> fetchLatestStories() async {
     if (OfflineModeService.isOffline.value) {
-      final cached = await OfflineDataService.readJson(
-        _latestStoriesCacheKey,
-      );
-
+      final cached = await OfflineDataService.readJson(_latestStoriesCacheKey);
       if (cached is List) {
         return List<dynamic>.from(cached);
       }
-
-      throw Exception(
-        'Danh sách truyện chưa được lưu để xem Offline.',
-      );
+      throw Exception('Danh sách truyện chưa được lưu để xem Offline.');
     }
-
     try {
       final response = await http.get(
         Uri.parse('${ApiConfig.api}/stories/latest-updated'),
       );
-
       if (response.statusCode != 200) {
         throw Exception(
           'Failed to load latest stories: HTTP ${response.statusCode}',
         );
       }
-
       final decoded = jsonDecode(utf8.decode(response.bodyBytes));
-
       if (decoded is! List) {
         throw Exception('Danh sách truyện không hợp lệ.');
       }
-
-      await OfflineDataService.saveJson(
-        _latestStoriesCacheKey,
-        decoded,
-      );
-
+      await OfflineDataService.saveJson(_latestStoriesCacheKey, decoded);
       return List<dynamic>.from(decoded);
     } catch (_) {
-      final cached = await OfflineDataService.readJson(
-        _latestStoriesCacheKey,
-      );
-
+      final cached = await OfflineDataService.readJson(_latestStoriesCacheKey);
       if (cached is List) {
         return List<dynamic>.from(cached);
       }
-
       rethrow;
+    }
+  }
+
+  Future<void> deleteStorySource(
+    int storyId,
+    String sourceName,
+    int adminId,
+  ) async {
+    final uri = Uri.parse(
+      '${ApiConfig.api}/stories/$storyId/source',
+    ).replace(queryParameters: {'sourceName': sourceName});
+    final response = await http.delete(
+      uri,
+      headers: {'userId': adminId.toString()},
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        'Không thể xóa nguồn "$sourceName": '
+        'HTTP ${response.statusCode} - ${response.body}',
+      );
     }
   }
 }

@@ -1,14 +1,11 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-
 import '../services/chapter_cache_manager.dart';
-
 class SequentialChapterImage extends StatefulWidget {
   final String imageUrl;
   final bool shouldLoad;
   final VoidCallback? onLoadFinished;
   final double? width;
-
   const SequentialChapterImage({
     super.key,
     required this.imageUrl,
@@ -16,26 +13,20 @@ class SequentialChapterImage extends StatefulWidget {
     this.onLoadFinished,
     this.width,
   });
-
   @override
   State<SequentialChapterImage> createState() =>
       _SequentialChapterImageState();
 }
-
 class _SequentialChapterImageState extends State<SequentialChapterImage> {
   bool _notifiedFinished = false;
-
   void _notifyFinished() {
     if (_notifiedFinished) return;
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _notifiedFinished) return;
-
       _notifiedFinished = true;
       widget.onLoadFinished?.call();
     });
   }
-
   Widget _placeholder() {
     return SizedBox(
       width: widget.width,
@@ -45,7 +36,6 @@ class _SequentialChapterImageState extends State<SequentialChapterImage> {
       ),
     );
   }
-
   Widget _errorWidget() {
     return SizedBox(
       width: widget.width,
@@ -77,22 +67,18 @@ class _SequentialChapterImageState extends State<SequentialChapterImage> {
       ),
     );
   }
-
   @override
   void didUpdateWidget(covariant SequentialChapterImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-
     if (oldWidget.imageUrl != widget.imageUrl) {
       _notifiedFinished = false;
     }
   }
-
   @override
   Widget build(BuildContext context) {
     if (!widget.shouldLoad) {
       return _placeholder();
     }
-
     return CachedNetworkImage(
       imageUrl: widget.imageUrl,
       width: widget.width,
@@ -101,7 +87,6 @@ class _SequentialChapterImageState extends State<SequentialChapterImage> {
       placeholder: (context, url) => _placeholder(),
       imageBuilder: (context, imageProvider) {
         _notifyFinished();
-
         return Image(
           image: imageProvider,
           width: widget.width,

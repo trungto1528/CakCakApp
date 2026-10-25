@@ -1,33 +1,24 @@
 import 'package:flutter/material.dart';
-
 import '../services/auth.dart';
-
 class ChangePasswordScreen extends StatefulWidget {
   final String username;
-
   const ChangePasswordScreen({super.key, required this.username});
-
   @override
   State<ChangePasswordScreen> createState() => _ChangePasswordScreenState();
 }
-
 class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   final oldController = TextEditingController();
   final newController = TextEditingController();
   final confirmController = TextEditingController();
-
   bool isLoading = false;
-
   Future<void> _changePassword() async {
     final oldPass = oldController.text;
     final newPass = newController.text;
     final confirmPass = confirmController.text;
-
     if (newPass != confirmPass) {
       _showMessage("Mật khẩu xác nhận không khớp");
       return;
     }
-
     if (newPass.length < 6) {
       _showMessage("Mật khẩu phải >= 6 ký tự");
       return;
@@ -36,29 +27,23 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       _showMessage("Mật khẩu mới phải khác mật khẩu cũ");
       return;
     }
-
     setState(() => isLoading = true);
-
     final response = await Auth().changePassword(
       widget.username,
       oldPass,
       newPass,
     );
-
     if (response == "OK") {
       _showMessage("Đổi mật khẩu thành công");
       Navigator.pop(context);
     } else {
       _showMessage(response);
     }
-
     setState(() => isLoading = false);
   }
-
   void _showMessage(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
-
   Widget _buildTextField(String hint, TextEditingController controller) {
     return TextField(
       controller: controller,
@@ -69,7 +54,6 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       ),
     );
   }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -84,7 +68,6 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
             const SizedBox(height: 16),
             _buildTextField("Xác nhận mật khẩu", confirmController),
             const SizedBox(height: 24),
-
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(

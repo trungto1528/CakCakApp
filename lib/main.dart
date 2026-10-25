@@ -2,50 +2,38 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:novel_app/route_observer.dart';
 import 'package:novel_app/services/app_preference.dart';
-
 import 'models/app_theme_mode.dart';
 import 'offline/service/offline_mode_service.dart';
 import 'platforms/windows/windows_main_screen.dart';
 import 'platforms/windows/windows_storage_manager.dart';
 import 'platforms/windows/windows_storage_setup_screen.dart';
 import 'screens/main_screen.dart';
-
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
   // Windows phải cấu hình thư mục lưu trữ trước khi khởi chạy.
   if (WindowsStorageManager.isWindows) {
     final root = await WindowsStorageManager.loadConfiguredRoot();
-
     if (root == null) {
       runApp(WindowsStorageBootstrapApp(onConfigured: _launchConfiguredApp));
       return;
     }
   }
-
   await _launchConfiguredApp();
 }
-
 /// Khởi chạy ứng dụng sau khi thư mục lưu trữ đã hợp lệ.
 Future<void> _launchConfiguredApp() async {
   await OfflineModeService.initialize();
-
   final prefs = await AppPreferences.getInstance();
   final index = prefs.getInt('themeMode') ?? 2;
-
   final safeIndex = index >= 0 && index < AppThemeMode.values.length
       ? index
       : 2;
-
   runApp(MyApp(initialMode: AppThemeMode.values[safeIndex]));
 }
-
 /// Ứng dụng tạm thời chỉ hiển thị màn hình chọn thư mục trên Windows.
 class WindowsStorageBootstrapApp extends StatelessWidget {
   final Future<void> Function() onConfigured;
-
   const WindowsStorageBootstrapApp({super.key, required this.onConfigured});
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -61,38 +49,29 @@ class WindowsStorageBootstrapApp extends StatelessWidget {
     );
   }
 }
-
 class MyApp extends StatefulWidget {
   final AppThemeMode initialMode;
-
   const MyApp({super.key, required this.initialMode});
-
   @override
   State<MyApp> createState() => _MyAppState();
 }
-
 class _MyAppState extends State<MyApp> {
   late AppThemeMode _themeMode;
-
   @override
   void initState() {
     super.initState();
     _themeMode = widget.initialMode;
   }
-
   Future<void> _saveTheme(AppThemeMode mode) async {
     final prefs = await AppPreferences.getInstance();
     await prefs.setInt('themeMode', mode.index);
   }
-
   void _changeTheme(AppThemeMode mode) {
     setState(() {
       _themeMode = mode;
     });
-
     _saveTheme(mode);
   }
-
   ThemeMode get _flutterThemeMode {
     switch (_themeMode) {
       case AppThemeMode.light:
@@ -103,7 +82,6 @@ class _MyAppState extends State<MyApp> {
         return ThemeMode.system;
     }
   }
-
   Widget _buildPlatformHome() {
     if (defaultTargetPlatform == TargetPlatform.windows) {
       return WindowsMainScreen(
@@ -111,10 +89,8 @@ class _MyAppState extends State<MyApp> {
         onThemeChanged: _changeTheme,
       );
     }
-
     return MainScreen(currentMode: _themeMode, onThemeChanged: _changeTheme);
   }
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(

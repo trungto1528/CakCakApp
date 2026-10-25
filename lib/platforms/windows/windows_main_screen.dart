@@ -1,28 +1,21 @@
-
 import 'package:flutter/material.dart';
-
 import '../../models/app_theme_mode.dart';
 import '../../screens/home_screen.dart';
 import '../../screens/library_screen.dart';
 import '../../screens/profile_screen.dart';
-
 class WindowsMainScreen extends StatefulWidget {
   final AppThemeMode currentMode;
   final ValueChanged<AppThemeMode> onThemeChanged;
-
   const WindowsMainScreen({
     super.key,
     required this.currentMode,
     required this.onThemeChanged,
   });
-
   @override
   State<WindowsMainScreen> createState() => _WindowsMainScreenState();
 }
-
 class _WindowsMainScreenState extends State<WindowsMainScreen> {
   int _selectedIndex = 0;
-
   late final List<Widget> _pages = [
     const HomePage(),
     const LibraryPage(),
@@ -31,11 +24,9 @@ class _WindowsMainScreenState extends State<WindowsMainScreen> {
       onThemeChanged: widget.onThemeChanged,
     ),
   ];
-
   @override
   void didUpdateWidget(covariant WindowsMainScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-
     if (oldWidget.currentMode != widget.currentMode ||
         oldWidget.onThemeChanged != widget.onThemeChanged) {
       _pages[2] = ProfilePage(
@@ -44,7 +35,6 @@ class _WindowsMainScreenState extends State<WindowsMainScreen> {
       );
     }
   }
-
   static const List<_NavigationItem> _navigationItems = [
     _NavigationItem(
       label: 'Trang chủ',
@@ -62,12 +52,10 @@ class _WindowsMainScreenState extends State<WindowsMainScreen> {
       selectedIcon: Icons.settings,
     ),
   ];
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-
     return Scaffold(
       body: SafeArea(
         child: Row(
@@ -189,7 +177,6 @@ class _WindowsMainScreenState extends State<WindowsMainScreen> {
       ),
     );
   }
-
   Widget _buildNavigationItem(
       BuildContext context,
       int index,
@@ -198,7 +185,6 @@ class _WindowsMainScreenState extends State<WindowsMainScreen> {
     final theme = Theme.of(context);
     final selected = _selectedIndex == index;
     final colorScheme = theme.colorScheme;
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
       child: Material(
@@ -259,12 +245,10 @@ class _WindowsMainScreenState extends State<WindowsMainScreen> {
     );
   }
 }
-
 class _NavigationItem {
   final String label;
   final IconData icon;
   final IconData selectedIcon;
-
   const _NavigationItem({
     required this.label,
     required this.icon,

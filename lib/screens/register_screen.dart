@@ -1,14 +1,10 @@
 import 'package:flutter/material.dart';
-
 import '../services/auth.dart';
-
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
-
   @override
   State<RegisterScreen> createState() => _RegisterScreenState();
 }
-
 class _RegisterScreenState extends State<RegisterScreen> {
   final usernameController = TextEditingController();
   final passwordController = TextEditingController();
@@ -16,12 +12,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final displayNameController = TextEditingController();
   String? error;
   bool isLoading = false;
-
   Future<void> _register() async {
     setState(() {
       error = null;
     });
-
     if (displayNameController.text.isEmpty ||
         usernameController.text.isEmpty ||
         passwordController.text.isEmpty) {
@@ -30,25 +24,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
       });
       return;
     }
-
     if (passwordController.text != confirmController.text) {
       setState(() {
         error = "Mật khẩu không khớp";
       });
       return;
     }
-
     setState(() {
       isLoading = true;
     });
-
     try {
       final res = await Auth().register(
         usernameController.text,
         passwordController.text,
         displayNameController.text,
       );
-
       if (res == "OK") {
         if (!mounted) return;
         Navigator.pop(context,true);
@@ -62,12 +52,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
         error = "Lỗi kết nối server";
       });
     }
-
     setState(() {
       isLoading = false;
     });
   }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -77,12 +65,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
         child: ListView(
           children: [
             const SizedBox(height: 20),
-
             const Text(
               "Tạo tài khoản",
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
-
             const SizedBox(height: 20),
             TextField(
               controller: displayNameController,
@@ -99,9 +85,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 border: OutlineInputBorder(),
               ),
             ),
-
             const SizedBox(height: 12),
-
             TextField(
               controller: passwordController,
               obscureText: true,
@@ -110,9 +94,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 border: OutlineInputBorder(),
               ),
             ),
-
             const SizedBox(height: 12),
-
             TextField(
               controller: confirmController,
               obscureText: true,
@@ -121,21 +103,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 border: OutlineInputBorder(),
               ),
             ),
-
             const SizedBox(height: 20),
-
             if (error != null)
               Text(error!, style: const TextStyle(color: Colors.red)),
-
             const SizedBox(height: 10),
-
             ElevatedButton(
               onPressed: isLoading ? null : _register,
               child: isLoading
                   ? const CircularProgressIndicator()
                   : const Text("Đăng ký"),
             ),
-
             TextButton(
               onPressed: () {
                 Navigator.pop(context); // quay lại login

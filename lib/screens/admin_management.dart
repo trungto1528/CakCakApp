@@ -1,9 +1,7 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:novel_app/services/crawl_service.dart';
 
 import '../config/api_config.dart';
@@ -23,13 +21,10 @@ class AdminStoryManagerScreen extends StatefulWidget {
 class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
   List stories = [];
   final Map<int, List> storyChapters = {};
-
   bool isLoading = true;
   bool isCheckingAll = false;
   bool isLoadingTasks = false;
-
   List<Map<String, dynamic>> updateTasks = [];
-
   Timer? _taskRefreshTimer;
 
   // Lưu nguồn đang chọn riêng cho từng truyện.
@@ -40,7 +35,6 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
     super.initState();
     _loadStories();
     _loadUpdateTasks();
-
     _taskRefreshTimer = Timer.periodic(
       const Duration(seconds: 3),
       (_) => _refreshRunningTasks(),
@@ -56,11 +50,9 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
   // ============================================================
   // LOAD STORIES
   // ============================================================
-
   Future<void> _loadStories() async {
     try {
       final data = await StoryFetcher().getAllStories(widget.adminId);
-
       data.sort((a, b) {
         if (a['status'] == 'PENDING' && b['status'] != 'PENDING') {
           return -1;
@@ -70,16 +62,13 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
         }
         return 0;
       });
-
       if (!mounted) return;
-
       setState(() {
         stories = data;
         isLoading = false;
       });
     } catch (e) {
       if (!mounted) return;
-
       setState(() => isLoading = false);
       _showMessage('Không thể tải danh sách truyện: $e');
     }
@@ -91,9 +80,7 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
         storyId,
         widget.adminId,
       );
-
       if (!mounted) return;
-
       final rawChapters = data?['chapters'];
       final chapters = rawChapters is List
           ? rawChapters
@@ -101,7 +88,6 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
                 .map((chapter) => Map<String, dynamic>.from(chapter))
                 .toList()
           : <Map<String, dynamic>>[];
-
       chapters.sort((a, b) {
         if (a['status'] == 'PENDING' && b['status'] != 'PENDING') {
           return -1;
@@ -109,25 +95,19 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
         if (a['status'] != 'PENDING' && b['status'] == 'PENDING') {
           return 1;
         }
-
         final aNumber = double.tryParse('${a['chapterNumber']}') ?? 0;
         final bNumber = double.tryParse('${b['chapterNumber']}') ?? 0;
         return aNumber.compareTo(bNumber);
       });
-
       final sources = <String>{};
       for (final chapter in chapters) {
         final source = '${chapter['createdBy'] ?? ''}'.trim();
         sources.add(source.isEmpty ? 'Không rõ nguồn' : source);
       }
-
       final sortedSources = sources.toList()..sort();
-
       setState(() {
         storyChapters[storyId] = chapters;
-
         final selectedSource = _selectedSourcesByStory[storyId];
-
         if (sortedSources.isEmpty) {
           _selectedSourcesByStory.remove(storyId);
         } else if (selectedSource == null ||
@@ -144,20 +124,15 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
   // ============================================================
   // UPDATE CHECK API
   // ============================================================
-
   Future<void> _checkStoryUpdates(int storyId) async {
     try {
       final response = await CrawlService().checkStoryUpdates(storyId);
       final taskId = response['taskId']?.toString();
-
       if (taskId == null || taskId.isEmpty) {
         throw Exception('Backend không trả về taskId');
       }
-
       await _loadUpdateTasks();
-
       if (!mounted) return;
-
       _showMessage('Đã bắt đầu kiểm tra truyện #$storyId.');
       _showTaskDetails(taskId);
     } catch (e) {
@@ -168,21 +143,15 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
 
   Future<void> _checkAllUpdates() async {
     if (isCheckingAll) return;
-
     setState(() => isCheckingAll = true);
-
     try {
       final response = await CrawlService().checkAllStoryUpdates();
       final taskId = response['taskId']?.toString();
-
       if (taskId == null || taskId.isEmpty) {
         throw Exception('Backend không trả về taskId');
       }
-
       await _loadUpdateTasks();
-
       if (!mounted) return;
-
       _showMessage('Đã bắt đầu kiểm tra tất cả truyện.');
       _showTaskDetails(taskId);
     } catch (e) {
@@ -197,22 +166,16 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
 
   Future<void> _loadUpdateTasks() async {
     if (isLoadingTasks) return;
-
     isLoadingTasks = true;
-
     try {
       final response = await CrawlService().getUpdateCheckTasks();
-
       response.sort((a, b) {
         final aTime = DateTime.tryParse('${a['createdAt'] ?? ''}');
         final bTime = DateTime.tryParse('${b['createdAt'] ?? ''}');
-
         if (aTime == null || bTime == null) return 0;
         return bTime.compareTo(aTime);
       });
-
       if (!mounted) return;
-
       setState(() => updateTasks = response);
     } catch (e) {
       debugPrint('Không thể tải danh sách task: $e');
@@ -223,11 +186,9 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
 
   Future<void> _refreshRunningTasks() async {
     if (!mounted || isLoadingTasks) return;
-
     final hasRunningTask = updateTasks.any(
       (task) => _isRunning(task['status']),
     );
-
     if (hasRunningTask) {
       await _loadUpdateTasks();
     }
@@ -242,27 +203,9 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
     return value == 'RUNNING' || value == 'PENDING' || value == 'QUEUED';
   }
 
-  String _responseMessage(http.Response response) {
-    final body = response.body.trim();
-
-    if (body.isEmpty) return 'HTTP ${response.statusCode}';
-
-    try {
-      final decoded = jsonDecode(body);
-
-      if (decoded is String) return decoded;
-      if (decoded is Map) {
-        return '${decoded['message'] ?? decoded['error'] ?? body}';
-      }
-    } catch (_) {}
-
-    return body;
-  }
-
   // ============================================================
   // TASK LIST
   // ============================================================
-
   void _showTaskList() {
     showDialog(
       context: context,
@@ -297,12 +240,10 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
                         separatorBuilder: (_, __) => const Divider(height: 20),
                         itemBuilder: (context, index) {
                           final task = updateTasks[index];
-
                           return _buildTaskCard(
                             task,
                             onTap: () {
                               final taskId = task['taskId']?.toString();
-
                               if (taskId != null && taskId.isNotEmpty) {
                                 Navigator.pop(dialogContext);
                                 _showTaskDetails(taskId);
@@ -331,10 +272,8 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
     final processed = _asInt(task['processed']);
     final total = _asInt(task['total']);
     final progress = total > 0 ? (processed / total).clamp(0.0, 1.0) : 0.0;
-
     final storyId = task['storyId'];
     final message = '${task['message'] ?? 'Không có thông báo'}';
-
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: InkWell(
@@ -388,7 +327,6 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
 
   Widget _buildTaskStatus(String status) {
     final normalized = status.toUpperCase();
-
     Color color;
     switch (normalized) {
       case 'COMPLETED':
@@ -404,7 +342,6 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
       default:
         color = Colors.orange;
     }
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -451,14 +388,11 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
   List<DropdownMenuItem<String>> _buildSourceDropdownItems(int storyId) {
     final chapters = storyChapters[storyId] ?? [];
     final sources = <String>{};
-
     for (final chapter in chapters) {
       final source = '${chapter['createdBy'] ?? ''}'.trim();
       sources.add(source.isEmpty ? 'Không rõ nguồn' : source);
     }
-
     final sortedSources = sources.toList()..sort();
-
     return sortedSources.map((source) {
       return DropdownMenuItem<String>(
         value: source,
@@ -469,11 +403,9 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
 
   Widget _buildDeleteSourceButton(int storyId) {
     final selectedSource = _selectedSourcesByStory[storyId];
-
     if (selectedSource == null || selectedSource.isEmpty) {
       return const SizedBox.shrink();
     }
-
     return IconButton(
       icon: const Icon(Icons.delete, color: Colors.red),
       tooltip: 'Xóa chapter của nguồn $selectedSource trong truyện này',
@@ -506,116 +438,29 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
       ),
     );
   }
-
   Future<void> _deleteChaptersOfSource(int storyId, String sourceName) async {
-    final chapters = List<Map<String, dynamic>>.from(
-      storyChapters[storyId] ?? [],
-    );
-
-    final targets = chapters.where((chapter) {
-      final source = '${chapter['createdBy'] ?? ''}'.trim();
-      final normalizedSource = source.isEmpty ? 'Không rõ nguồn' : source;
-
-      return normalizedSource == sourceName;
-    }).toList();
-
-    var deleted = 0;
-    var failed = 0;
-
-    for (final chapter in targets) {
-      final chapterId = _asInt(chapter['id']);
-
-      if (chapterId <= 0) {
-        failed++;
-        continue;
-      }
-
-      try {
-        await ChapterFetcher().deleteChapter(chapterId, widget.adminId);
-        deleted++;
-      } catch (e) {
-        failed++;
-        debugPrint('Lỗi xóa chapter $chapterId: $e');
-      }
-    }
-
-    if (!mounted) return;
-
-    await _loadChapters(storyId);
-
-    if (!mounted) return;
-
-    _showMessage(
-      'Đã xóa $deleted chapter của nguồn $sourceName'
-      '${failed > 0 ? ', lỗi $failed chapter' : ''}.',
-    );
-  }
-
-  // ============================================================
-  // CHAPTER DETAIL
-  // ============================================================
-
-  Future<void> _viewChapter(int chapterId) async {
     try {
-      final chapter = await ChapterFetcher().fetchChapter(chapterId);
-
+      await StoryFetcher().deleteStorySource(
+        storyId,
+        sourceName,
+        widget.adminId,
+      );
       if (!mounted) return;
-
-      showDialog(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: Text(
-            'Chương ${chapter['chapterNumber']}: ${chapter['title']}',
-          ),
-          content: SizedBox(
-            width: 700,
-            height: 500,
-            child: ListView(
-              children:
-                  ((chapter['blocks'] is List)
-                          ? chapter['blocks'] as List
-                          : <dynamic>[])
-                      .map<Widget>((block) {
-                        if (block is Map && block['type'] == 'text') {
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            child: Text('${block['data'] ?? ''}'),
-                          );
-                        }
-
-                        if (block is Map && block['type'] == 'image') {
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            child: CachedNetworkImage(
-                              imageUrl:
-                                  '${ApiConfig.chapterImage}/${block['data']}',
-                            ),
-                          );
-                        }
-
-                        return const SizedBox.shrink();
-                      })
-                      .toList(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Đóng'),
-            ),
-          ],
-        ),
+      // Tải lại chapter sau khi backend xóa nguồn thành công.
+      await _loadChapters(storyId);
+      if (!mounted) return;
+      _showMessage(
+        'Đã xóa toàn bộ chapter của nguồn "$sourceName" '
+        'trong truyện ID $storyId.',
       );
     } catch (e) {
       if (!mounted) return;
-      _showMessage('$e');
+      _showMessage('Không thể xóa chapter của nguồn "$sourceName": $e');
     }
   }
-
   // ============================================================
   // STORY / CHAPTER ACTIONS
   // ============================================================
-
   Future<void> _approveStory(int id) async {
     try {
       await StoryFetcher().approveStory(widget.adminId, id);
@@ -647,7 +492,6 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
     try {
       await ChapterFetcher().deleteChapter(chapterId, widget.adminId);
       await _loadChapters(storyId);
-
       if (!mounted) return;
       _showMessage('Đã xoá chương');
     } catch (e) {
@@ -748,7 +592,6 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
 
   void _showMessage(String message) {
     if (!mounted) return;
-
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
@@ -757,7 +600,6 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
   // ============================================================
   // MAIN UI
   // ============================================================
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -801,7 +643,6 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
                         final story = stories[index];
                         final id = _asInt(story['id']);
                         final title = '${story['title'] ?? ''}';
-
                         return Card(
                           elevation: 3,
                           margin: const EdgeInsets.symmetric(vertical: 6),
@@ -937,10 +778,8 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
   // ============================================================
   // CHAPTER LIST
   // ============================================================
-
   List<Widget> _buildChapters(int storyId) {
     final chapters = storyChapters[storyId];
-
     if (chapters == null) {
       return const [
         Padding(
@@ -949,7 +788,6 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
         ),
       ];
     }
-
     if (chapters.isEmpty) {
       return const [
         Padding(
@@ -958,13 +796,11 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
         ),
       ];
     }
-
     final sourceItems = _buildSourceDropdownItems(storyId);
     final sources = sourceItems
         .map((item) => item.value)
         .whereType<String>()
         .toList();
-
     if (sources.isEmpty) {
       return const [
         Padding(
@@ -973,20 +809,16 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
         ),
       ];
     }
-
     final storedSource = _selectedSourcesByStory[storyId];
     final selectedSource =
         storedSource != null && sources.contains(storedSource)
         ? storedSource
         : sources.first;
-
     final filteredChapters = chapters.where((chapter) {
       final source = '${chapter['createdBy'] ?? ''}'.trim();
       final normalizedSource = source.isEmpty ? 'Không rõ nguồn' : source;
-
       return normalizedSource == selectedSource;
     }).toList();
-
     return [
       Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
@@ -1004,7 +836,6 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
                 items: sourceItems,
                 onChanged: (String? newValue) {
                   if (newValue == null) return;
-
                   setState(() {
                     _selectedSourcesByStory[storyId] = newValue;
                   });
@@ -1024,7 +855,6 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
         ...filteredChapters.map((chapter) {
           final chapterId = _asInt(chapter['id']);
           final status = '${chapter['status'] ?? 'UNKNOWN'}';
-
           return ListTile(
             title: Text(
               'Chương ${chapter['chapterNumber']}: ${chapter['title'] ?? ''}',
@@ -1063,14 +893,11 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
   // ============================================================
   // SOURCE MANAGEMENT
   // ============================================================
-
   // ============================================================
   // STATUS
   // ============================================================
-
   Widget _buildStoryStatus(String status) {
     final color = _getStatusColor(status);
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -1111,7 +938,6 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
 // ================================================================
 // TASK DETAILS DIALOG
 // ================================================================
-
 class _TaskDetailsDialog extends StatefulWidget {
   final String taskId;
   final int adminId;
@@ -1138,16 +964,13 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
   String? error;
   bool isLoading = true;
   bool isCrawlingAll = false;
-
   final Set<String> crawlingSources = <String>{};
-
   Timer? timer;
 
   @override
   void initState() {
     super.initState();
     _load();
-
     timer = Timer.periodic(const Duration(seconds: 3), (_) {
       if (task == null || widget.isRunning(task!['status'])) {
         _load();
@@ -1164,19 +987,15 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
   Future<void> _load() async {
     try {
       final result = await widget.loadTask(widget.taskId);
-
       if (!mounted) return;
-
       setState(() {
         task = result;
         error = null;
         isLoading = false;
       });
-
       await widget.onRefreshTasks();
     } catch (e) {
       if (!mounted) return;
-
       setState(() {
         error = '$e';
         isLoading = false;
@@ -1187,45 +1006,34 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
   // ============================================================
   // CRAWL NEW CHAPTERS
   // ============================================================
-
   String _sourceKey(Map<String, dynamic> result) {
     final sourceUrl = '${result['sourceUrl'] ?? ''}'.trim();
     if (sourceUrl.isNotEmpty) return sourceUrl;
-
     return '${result['sourceId'] ?? result['sourceName'] ?? result['storyTitle']}';
   }
 
   /// Chuẩn bị payload theo API /import-selected.
   Map<String, dynamic> _buildImportPayload(Map<String, dynamic> result) {
     final sourceUrl = '${result['sourceUrl'] ?? ''}'.trim();
-
     if (sourceUrl.isEmpty) {
       throw Exception('Nguồn không có sourceUrl');
     }
-
     final rawStoryId = result['storyId'];
     final storyId = widget.asInt(rawStoryId);
-
     if (rawStoryId == null || storyId <= 0) {
       throw Exception(
         'Kết quả không có storyId hợp lệ. '
         'Backend cần trả storyId trong mỗi kết quả kiểm tra.',
       );
     }
-
     final rawChapters = result['chapters'];
     final chapters = rawChapters is List ? rawChapters : <dynamic>[];
-
     final selectedChapters = <Map<String, dynamic>>[];
-
     for (final rawChapter in chapters) {
       if (rawChapter is! Map) continue;
-
       final chapter = Map<String, dynamic>.from(rawChapter);
       final url = '${chapter['url'] ?? ''}'.trim();
-
       if (url.isEmpty) continue;
-
       selectedChapters.add({
         'title': '${chapter['title'] ?? 'Chapter mới'}',
         'url': url,
@@ -1234,11 +1042,9 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
         'crawled': false,
       });
     }
-
     if (selectedChapters.isEmpty) {
       throw Exception('Nguồn này không có chapter hợp lệ để crawl');
     }
-
     return {
       'title': '${result['storyTitle'] ?? 'Truyện chưa có tên'}',
       'sourceUrl': sourceUrl,
@@ -1252,26 +1058,19 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
   /// không khẳng định toàn bộ chapter đã lưu xong.
   Future<void> _crawlResult(Map<String, dynamic> result) async {
     final sourceKey = _sourceKey(result);
-
     if (crawlingSources.contains(sourceKey)) return;
-
     setState(() {
       crawlingSources.add(sourceKey);
     });
-
     try {
       final payload = _buildImportPayload(result);
-
       final response = await CrawlService().importStory(
         payload,
         widget.adminId,
       );
-
       if (!mounted) return;
-
       final taskId = response['taskId']?.toString();
       final message = response['message']?.toString();
-
       _showDialogMessage(
         message != null && message.isNotEmpty
             ? message
@@ -1292,39 +1091,28 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
   /// Crawl tuần tự từng nguồn có chapter mới.
   Future<void> _crawlAllResults(List<Map<String, dynamic>> results) async {
     if (isCrawlingAll) return;
-
     final candidates = results.where((result) {
       final chapters = result['chapters'];
       return chapters is List && chapters.isNotEmpty;
     }).toList();
-
     if (candidates.isEmpty) {
       _showDialogMessage('Không có nguồn nào có chapter mới để crawl.');
       return;
     }
-
     setState(() => isCrawlingAll = true);
-
     var succeeded = 0;
     var failed = 0;
-
     try {
       for (final result in candidates) {
         if (!mounted) return;
-
         final sourceKey = _sourceKey(result);
-
         if (crawlingSources.contains(sourceKey)) {
           continue;
         }
-
         setState(() => crawlingSources.add(sourceKey));
-
         try {
           final payload = _buildImportPayload(result);
-
           await CrawlService().importStory(payload, widget.adminId);
-
           succeeded++;
         } catch (e) {
           failed++;
@@ -1335,9 +1123,7 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
           }
         }
       }
-
       if (!mounted) return;
-
       _showDialogMessage(
         'Đã gửi crawl tuần tự: $succeeded nguồn thành công, '
         '$failed nguồn lỗi.',
@@ -1351,7 +1137,6 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
 
   void _showDialogMessage(String message) {
     if (!mounted) return;
-
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
@@ -1360,16 +1145,12 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
   // ============================================================
   // COVER IMAGE
   // ============================================================
-
   Widget _buildCover(dynamic coverUrl) {
     final cover = '${coverUrl ?? ''}'.trim();
-
     if (cover.isEmpty || cover.toLowerCase() == 'null') {
       return _coverPlaceholder();
     }
-
     final String imageUrl;
-
     if (cover.startsWith('https://') || cover.startsWith('http://')) {
       imageUrl = cover;
     } else {
@@ -1377,7 +1158,6 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
       final path = cover.replaceAll(RegExp(r'^/+'), '');
       imageUrl = '$baseUrl/$path';
     }
-
     return ClipRRect(
       borderRadius: BorderRadius.circular(6),
       child: CachedNetworkImage(
@@ -1417,11 +1197,9 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
   // ============================================================
   // BUILD
   // ============================================================
-
   @override
   Widget build(BuildContext context) {
     final current = task;
-
     return Column(
       children: [
         Padding(
@@ -1471,20 +1249,16 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
     final processed = widget.asInt(current['processed']);
     final total = widget.asInt(current['total']);
     final progress = total > 0 ? (processed / total).clamp(0.0, 1.0) : 0.0;
-
     final results = current['results'] is List
         ? (current['results'] as List)
               .whereType<Map>()
               .map((item) => Map<String, dynamic>.from(item))
               .toList()
         : <Map<String, dynamic>>[];
-
     final errors = current['errors'] is List
         ? current['errors'] as List
         : <dynamic>[];
-
     Color statusColor;
-
     switch (status.toUpperCase()) {
       case 'COMPLETED':
         statusColor = Colors.green;
@@ -1499,12 +1273,10 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
       default:
         statusColor = Colors.orange;
     }
-
     final crawlableResults = results.where((result) {
       final chapters = result['chapters'];
       return chapters is List && chapters.isNotEmpty;
     }).toList();
-
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -1586,9 +1358,7 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
             ),
           ),
         ),
-
         const SizedBox(height: 20),
-
         // RESULTS HEADER AND CRAWL ALL BUTTON
         Row(
           children: [
@@ -1604,7 +1374,6 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
           ],
         ),
         const SizedBox(height: 10),
-
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
@@ -1634,14 +1403,11 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
             final chapters = result['chapters'] is List
                 ? result['chapters'] as List
                 : <dynamic>[];
-
             final chapterCount = widget.asInt(
               result['newChapterCount'] ?? chapters.length,
             );
-
             final sourceKey = _sourceKey(result);
             final isCrawling = crawlingSources.contains(sourceKey);
-
             return Card(
               margin: const EdgeInsets.only(bottom: 8),
               elevation: 0,
@@ -1681,7 +1447,6 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                       ),
                     ),
                   const SizedBox(height: 8),
-
                   // CRAWL THIS SOURCE
                   SizedBox(
                     width: double.infinity,
@@ -1702,7 +1467,6 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                     ),
                   ),
                   const SizedBox(height: 8),
-
                   if (chapters.isEmpty)
                     const Align(
                       alignment: Alignment.centerLeft,
@@ -1716,7 +1480,6 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                       final chapter = rawChapter is Map
                           ? Map<String, dynamic>.from(rawChapter)
                           : <String, dynamic>{};
-
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 5),
                         child: Row(
@@ -1762,9 +1525,7 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
               ),
             );
           }),
-
         const SizedBox(height: 16),
-
         // ERRORS
         Row(
           children: [
@@ -1780,7 +1541,6 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
           ],
         ),
         const SizedBox(height: 8),
-
         if (errors.isEmpty)
           _emptyTaskMessage('Không có nguồn lỗi được ghi nhận.')
         else
@@ -1788,7 +1548,6 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
             final item = rawError is Map
                 ? Map<String, dynamic>.from(rawError)
                 : <String, dynamic>{};
-
             return Card(
               margin: const EdgeInsets.only(bottom: 8),
               elevation: 0,
@@ -1824,7 +1583,6 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
               ),
             );
           }),
-
         if (error != null) ...[
           const SizedBox(height: 8),
           Text(error!, style: const TextStyle(color: Colors.red)),

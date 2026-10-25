@@ -1,76 +1,64 @@
-
 name: Build & Release APK + Windows (Flutter 3.41.2)
-
 on:
   push:
     branches:
       - main
-
+    paths:
+      - 'changelog/**'
 permissions:
   contents: write
-
 jobs:
-  # Đọc version duy nhất từ pubspec.yaml
+  # Đọc version từ pubspec.yaml, build number từ github run number
   version:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.read_version.outputs.version }}
-      build_number: ${{ github.run_number }}
-
+      build_number: ${{ steps.read_version.outputs.build_number }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Read version from pubspec.yaml
         id: read_version
         shell: bash
         run: |
           FULL_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
           MAIN_VERSION="${FULL_VERSION%%+*}"
-
           if [ -z "$MAIN_VERSION" ]; then
             echo "Không đọc được version từ pubspec.yaml"
             exit 1
           fi
-
           echo "version=$MAIN_VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_number=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
           echo "Version: $MAIN_VERSION"
-          echo "Build number: $GITHUB_RUN_NUMBER"
-
+          echo "Build number: ${{ github.run_number }}"
   # =========================
   # BUILD ANDROID
   # =========================
   build-android:
     runs-on: ubuntu-latest
     needs: version
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-
       - name: Setup Java
         uses: actions/setup-java@v3
         with:
           distribution: temurin
           java-version: '17'
-
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.41.2'
           channel: stable
           cache : true
-
       - name: Install dependencies
         run: flutter pub get
-
       - name: Build split APK
         run: >
           flutter build apk
           --release
           --split-per-abi
           --build-number=${{ needs.version.outputs.build_number }}
-
       - name: Sign APK
         uses: r0adkll/sign-android-release@v1
         with:
@@ -81,63 +69,52 @@ jobs:
           keyPassword: ${{ secrets.KEY_PASSWORD }}
         env:
           BUILD_TOOLS_VERSION: "34.0.0"
-
       - name: Upload Android APK artifacts
         uses: actions/upload-artifact@v4
         with:
           name: android-apks
           path: build/app/outputs/flutter-apk/*-signed.apk
           if-no-files-found: error
-
   # =========================
   # BUILD WINDOWS
   # =========================
   build-windows:
     runs-on: windows-latest
     needs: version
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.41.2'
           channel: stable
           cache: true
-
       - name: Install dependencies
         run: flutter pub get
-
       - name: Build Windows release
         run: >
           flutter build windows
           --release
           --build-name=${{ needs.version.outputs.version }}
           --build-number=${{ needs.version.outputs.build_number }}
-
       - name: Package Windows release
         shell: pwsh
         run: |
           $releaseDir = "build/windows/x64/runner/Release"
-
           if (!(Test-Path $releaseDir)) {
             throw "Không tìm thấy thư mục Windows Release: $releaseDir"
           }
-
           Compress-Archive `
             -Path "$releaseDir/*" `
             -DestinationPath "ttcs-windows-x64.zip" `
             -Force
-
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
           path: ttcs-windows-x64.zip
           if-no-files-found: error
-
   # =========================
   # CREATE GITHUB RELEASE
   # =========================
@@ -147,37 +124,47 @@ jobs:
       - version
       - build-android
       - build-windows
-
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
       - name: Download Android APK artifacts
         uses: actions/download-artifact@v4
         with:
           name: android-apks
           path: release-files
-
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
           name: windows-build
           path: release-files
-
+      - name: Read changelog note file
+        id: changelog
+        shell: bash
+        run: |
+          CHANGELOG_FILE="changelog/note.md"
+          if [ -f "$CHANGELOG_FILE" ]; then
+            echo "content<<EOF" >> "$GITHUB_OUTPUT"
+            cat "$CHANGELOG_FILE" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+            echo "Found changelog: $CHANGELOG_FILE"
+          else
+            echo "" >> "$GITHUB_OUTPUT"
+            echo "No changelog file: $CHANGELOG_FILE"
+          fi
+      - name: Create git tag
+        shell: bash
+        run: |
+          TAG="v${{ needs.version.outputs.version }}+${{ needs.version.outputs.build_number }}"
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag "$TAG"
+          git push origin "$TAG"
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "v${{ needs.version.outputs.version }}+${{ needs.version.outputs.build_number }}"
           name: "v${{ needs.version.outputs.version }}+${{ needs.version.outputs.build_number }}"
-          body: |
-            ## Automated Release
-
-            - Version: ${{ needs.version.outputs.version }}
-            - Build Number: ${{ needs.version.outputs.build_number }}
-            - Commit: ${{ github.event.head_commit.message }}
-
-            ### Android
-            Chọn APK phù hợp với kiến trúc CPU của thiết bị.
-
-            ### Windows
-            Tải ttcs-windows-x64.zip, giải nén rồi chạy file .exe bên trong.
+          body: ${{ steps.changelog.outputs.content }}
           files: release-files/*
           fail_on_unmatched_files: true
           overwrite_files: true

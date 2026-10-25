@@ -1,50 +1,34 @@
-
 import 'dart:async';
-
 import 'package:flutter/material.dart';
-
 import '../config/api_config.dart';
 import '../services/crawl_service.dart';
-
 class CrawlScreen extends StatefulWidget {
   final int userId;
-
   const CrawlScreen({super.key, required this.userId});
-
   @override
   State<CrawlScreen> createState() => _CrawlScreenState();
 }
-
 class _CrawlScreenState extends State<CrawlScreen> {
   final TextEditingController searchController = TextEditingController();
   final TextEditingController chapterRangeController = TextEditingController();
-
   final CrawlService crawlService = CrawlService();
-
   Map<String, dynamic>? data;
   List<Map<String, dynamic>> searchResults = [];
-
   List<String> websites = [];
   String? selectedWebsite;
-
   String? _currentStoryUrl;
-
   int? _selectedStoryId;
   bool _createNewStory = true;
-
   bool loading = false;
   bool searching = false;
   bool importing = false;
   bool loadingWebsites = false;
-
   Timer? _progressTimer;
-
   @override
   void initState() {
     super.initState();
     loadWebsites();
   }
-
   @override
   void dispose() {
     _progressTimer?.cancel();
@@ -52,42 +36,34 @@ class _CrawlScreenState extends State<CrawlScreen> {
     chapterRangeController.dispose();
     super.dispose();
   }
-
   // =========================================================
   // HELPERS
   // =========================================================
-
   int _asInt(dynamic value) {
     if (value is int) return value;
     if (value is num) return value.toInt();
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
-
   double _asDouble(dynamic value) {
     if (value is num) return value.toDouble();
     return double.tryParse(value?.toString() ?? '') ?? 0;
   }
-
   bool _isCrawled(Map chapter) {
     return chapter['crawled'] == true ||
         chapter['crawled']?.toString().toLowerCase() == 'true' ||
         chapter['isCrawled'] == true ||
         chapter['isCrawled']?.toString().toLowerCase() == 'true';
   }
-
   bool _isTaskDone(String message) {
     final lower = message.toLowerCase();
-
     return message.contains('Hoàn thành') ||
         message.contains('Lỗi') ||
         lower.contains('hủy') ||
         lower.contains('huỷ');
   }
-
   List<dynamic> get chapters {
     return data?['chapters'] as List? ?? [];
   }
-
   List<Map<String, dynamic>> get selectedChapters {
     return chapters
         .where((chapter) {
@@ -99,32 +75,25 @@ class _CrawlScreenState extends State<CrawlScreen> {
     })
         .toList();
   }
-
   List<Map<String, dynamic>> get similarStories {
     final raw = data?['similarStories'] as List? ?? [];
-
     return raw
         .whereType<Map>()
         .map((item) => Map<String, dynamic>.from(item))
         .toList();
   }
-
   String _getWebsiteReferer(String? url) {
     if (url == null || url.trim().isEmpty) {
       return 'https://www.mangahere.cc/';
     }
-
     final uri = Uri.tryParse(url.trim());
-
     if (uri == null ||
         !uri.hasAuthority ||
         (uri.scheme != 'http' && uri.scheme != 'https')) {
       return 'https://www.mangahere.cc/';
     }
-
     return '${uri.scheme}://${uri.authority}/';
   }
-
   Map<String, String> _imageHeaders(String? storyUrl) {
     return {
       'Referer': _getWebsiteReferer(storyUrl),
@@ -134,23 +103,19 @@ class _CrawlScreenState extends State<CrawlScreen> {
           'Chrome/146.0.0.0 Safari/537.36',
     };
   }
-
   String _getResultUrl(Map<String, dynamic> result) {
     return result['url']?.toString().trim() ??
         result['storyUrl']?.toString().trim() ??
         '';
   }
-
   int? _readStoryId(dynamic value) {
     if (value is int) return value;
     if (value is num) return value.toInt();
     return int.tryParse(value?.toString() ?? '');
   }
-
   // =========================================================
   // CHAPTER RANGE SELECTION
   // =========================================================
-
   /// Phân tích khoảng theo số thứ tự trong danh sách.
   ///
   /// Ví dụ:
@@ -166,53 +131,42 @@ class _CrawlScreenState extends State<CrawlScreen> {
   /// Dấu phẩy và dấu chấm phẩy đều được hỗ trợ.
   List<(int, int)>? _parseChapterRanges(String input) {
     final text = input.trim();
-
     if (text.isEmpty) return null;
-
     final parts = text.split(RegExp(r'[,;，；]'));
     final ranges = <(int, int)>[];
-
     for (final rawPart in parts) {
       final part = rawPart.trim();
-
       if (part.isEmpty) {
         throw FormatException(
           'Có khoảng chương bị bỏ trống. '
               'Ví dụ hợp lệ: 1-20,30-50',
         );
       }
-
       final match = RegExp(
         r'^(\d+)\s*(?:-\s*(\d+))?$',
       ).firstMatch(part);
-
       if (match == null) {
         throw FormatException(
           'Khoảng "$part" không hợp lệ. '
               'Ví dụ: 1-20,30-50,60',
         );
       }
-
       final start = int.parse(match.group(1)!);
       final end = match.group(2) == null
           ? start
           : int.parse(match.group(2)!);
-
       if (start < 1 || end < 1) {
         throw FormatException(
           'Số thứ tự chương phải bắt đầu từ 1: "$part"',
         );
       }
-
       ranges.add((
       start <= end ? start : end,
       start <= end ? end : start,
       ));
     }
-
     return ranges.isEmpty ? null : ranges;
   }
-
   /// Áp dụng khoảng theo vị trí của chương trong danh sách.
   ///
   /// Ví dụ:
@@ -224,56 +178,44 @@ class _CrawlScreenState extends State<CrawlScreen> {
   /// Chương đã crawl luôn bị bỏ chọn.
   void applyChapterRanges() {
     if (data == null) return;
-
     try {
       final ranges = _parseChapterRanges(
         chapterRangeController.text,
       );
-
       if (ranges == null) {
         _showSnackBar(
           'Vui lòng nhập khoảng chương, ví dụ: 1-20,30-50',
         );
         return;
       }
-
       int selectedCount = 0;
       int crawledCount = 0;
-
       setState(() {
         for (int i = 0; i < chapters.length; i++) {
           final chapter = chapters[i] as Map;
-
           // Số thứ tự dựa trên vị trí trong danh sách.
           // Không phụ thuộc title, chapterNumber hay order.
           final chapterOrder = i + 1;
-
           if (_isCrawled(chapter)) {
             chapter['choosen'] = false;
             crawledCount++;
             continue;
           }
-
           final matched = ranges.any(
                 (range) =>
             chapterOrder >= range.$1 &&
                 chapterOrder <= range.$2,
           );
-
           chapter['choosen'] = matched;
-
           if (matched) {
             selectedCount++;
           }
         }
       });
-
       var message = 'Đã chọn $selectedCount chương theo số thứ tự';
-
       if (crawledCount > 0) {
         message += ', bỏ qua $crawledCount chương đã crawl';
       }
-
       _showSnackBar(message);
     } on FormatException catch (e) {
       _showSnackBar(e.message);
@@ -281,34 +223,26 @@ class _CrawlScreenState extends State<CrawlScreen> {
       _showSnackBar('Lỗi xử lý khoảng chương: $e');
     }
   }
-
   void _clearChapterRanges() {
     chapterRangeController.clear();
     if (mounted) setState(() {});
   }
-
   // =========================================================
   // LOAD WEBSITES
   // =========================================================
-
   Future<void> loadWebsites() async {
     setState(() {
       loadingWebsites = true;
     });
-
     try {
       final results = await crawlService.getSupportedWebsites();
-
       if (!mounted) return;
-
       setState(() {
         websites = results.where((name) => name.isNotEmpty).toSet().toList();
-
         if (!websites.contains(selectedWebsite)) {
           selectedWebsite = websites.isNotEmpty ? websites.first : null;
         }
       });
-
       if (websites.isEmpty) {
         _showSnackBar('Backend chưa đăng ký website cào nào');
       }
@@ -323,29 +257,22 @@ class _CrawlScreenState extends State<CrawlScreen> {
       }
     }
   }
-
   // =========================================================
   // SEARCH
   // =========================================================
-
   Future<void> searchStories() async {
     final keyword = searchController.text.trim();
     final website = selectedWebsite;
-
     if (website == null || website.isEmpty) {
       _showSnackBar('Vui lòng chọn website');
       return;
     }
-
     if (keyword.isEmpty) {
       _showSnackBar('Vui lòng nhập tên truyện');
       return;
     }
-
     if (searching) return;
-
     FocusScope.of(context).unfocus();
-
     setState(() {
       searching = true;
       searchResults = [];
@@ -355,16 +282,12 @@ class _CrawlScreenState extends State<CrawlScreen> {
       _createNewStory = true;
       chapterRangeController.clear();
     });
-
     try {
       final results = await crawlService.searchStories(website, keyword);
-
       if (!mounted) return;
-
       setState(() {
         searchResults = results;
       });
-
       if (results.isEmpty) {
         _showSnackBar('Không tìm thấy truyện trên $website');
       }
@@ -379,23 +302,17 @@ class _CrawlScreenState extends State<CrawlScreen> {
       }
     }
   }
-
   // =========================================================
   // SELECT SEARCH RESULT
   // =========================================================
-
   Future<void> selectSearchResult(Map<String, dynamic> result) async {
     final url = _getResultUrl(result);
-
     if (url.isEmpty) {
       _showSnackBar('Không có URL truyện');
       return;
     }
-
     if (loading) return;
-
     FocusScope.of(context).unfocus();
-
     setState(() {
       loading = true;
       data = null;
@@ -404,31 +321,22 @@ class _CrawlScreenState extends State<CrawlScreen> {
       _createNewStory = true;
       chapterRangeController.clear();
     });
-
     try {
       final resultData = await crawlService.crawlStory(url);
-
       if (!mounted) return;
-
       final normalizedData = Map<String, dynamic>.from(resultData);
       final rawChapters = normalizedData['chapters'] as List? ?? [];
-
       normalizedData['url'] ??= url;
-
       normalizedData['chapters'] = rawChapters.map((rawChapter) {
         final chapter = Map<String, dynamic>.from(rawChapter as Map);
         final isCrawled = _isCrawled(chapter);
-
         chapter['crawled'] = isCrawled;
         chapter['choosen'] = !isCrawled;
-
         return chapter;
       }).toList();
-
       final initialStoryId = _readStoryId(
         normalizedData['selectedStoryId'],
       );
-
       setState(() {
         data = normalizedData;
         _selectedStoryId = initialStoryId;
@@ -445,44 +353,35 @@ class _CrawlScreenState extends State<CrawlScreen> {
       }
     }
   }
-
   // =========================================================
   // STORY MATCHING SELECTION
   // =========================================================
-
   void _chooseCreateNewStory() {
     setState(() {
       _createNewStory = true;
       _selectedStoryId = null;
-
       if (data != null) {
         data!['selectedStoryId'] = null;
       }
     });
   }
-
   void _chooseExistingStory(Map<String, dynamic> story) {
     final storyId = _readStoryId(story['storyId']);
-
     if (storyId == null) {
       _showSnackBar('Truyện tương tự không có storyId hợp lệ');
       return;
     }
-
     setState(() {
       _createNewStory = false;
       _selectedStoryId = storyId;
-
       if (data != null) {
         data!['selectedStoryId'] = storyId;
       }
     });
   }
-
   // =========================================================
   // BACK TO SEARCH
   // =========================================================
-
   void backToSearch() {
     setState(() {
       data = null;
@@ -493,18 +392,14 @@ class _CrawlScreenState extends State<CrawlScreen> {
       chapterRangeController.clear();
     });
   }
-
   // =========================================================
   // CHAPTER SELECTION
   // =========================================================
-
   void selectAll(bool value) {
     if (data == null) return;
-
     setState(() {
       for (final rawChapter in chapters) {
         final chapter = rawChapter as Map;
-
         if (_isCrawled(chapter)) {
           chapter['choosen'] = false;
         } else {
@@ -513,53 +408,39 @@ class _CrawlScreenState extends State<CrawlScreen> {
       }
     });
   }
-
   void toggle(Map chapter, bool value) {
     if (_isCrawled(chapter)) return;
-
     setState(() {
       chapter['choosen'] = value;
     });
   }
-
   // =========================================================
   // IMPORT
   // =========================================================
-
   Future<void> submit() async {
     if (data == null || selectedChapters.isEmpty) {
       _showSnackBar('Vui lòng chọn ít nhất 1 chương chưa crawl');
       return;
     }
-
     if (!_createNewStory && _selectedStoryId == null) {
       _showSnackBar('Vui lòng chọn truyện cần gộp hoặc tạo truyện mới');
       return;
     }
-
     if (importing) return;
-
     setState(() {
       importing = true;
     });
-
     try {
       final payload = Map<String, dynamic>.from(data!);
-
       payload['chapters'] = selectedChapters;
       payload['selectedStoryId'] = _createNewStory ? null : _selectedStoryId;
-
       final res = await crawlService.importStory(payload, widget.userId);
-
       final taskId = res['taskId']?.toString();
-
       if (taskId == null || taskId.isEmpty || taskId == 'null') {
         _showSnackBar('Không nhận được taskId từ server');
         return;
       }
-
       if (!mounted) return;
-
       _showProgressSheet(taskId);
     } catch (e) {
       if (mounted) {
@@ -573,23 +454,18 @@ class _CrawlScreenState extends State<CrawlScreen> {
       }
     }
   }
-
   // =========================================================
   // SNACKBAR
   // =========================================================
-
   void _showSnackBar(String message) {
     if (!mounted) return;
-
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
   }
-
   // =========================================================
   // TASK LIST
   // =========================================================
-
   void _showAllTasksSheet() {
     showModalBottomSheet<void>(
       context: context,
@@ -606,17 +482,13 @@ class _CrawlScreenState extends State<CrawlScreen> {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
               }
-
               if (snapshot.hasError) {
                 return Center(child: Text('Lỗi: ${snapshot.error}'));
               }
-
               final tasks = snapshot.data ?? {};
-
               if (tasks.isEmpty) {
                 return const Center(child: Text('Không có tiến trình nào'));
               }
-
               return Column(
                 children: [
                   const Padding(
@@ -634,21 +506,16 @@ class _CrawlScreenState extends State<CrawlScreen> {
                       itemCount: tasks.length,
                       itemBuilder: (context, index) {
                         final taskId = tasks.keys.elementAt(index);
-
                         final task = Map<String, dynamic>.from(
                           tasks[taskId] as Map,
                         );
-
                         final processed = _asInt(task['processed']);
                         final total = _asInt(task['total']);
-
                         final double progress = total > 0
                             ? (processed / total).clamp(0.0, 1.0)
                             : 0.0;
-
                         final message = task['message']?.toString() ?? '';
                         final isDone = _isTaskDone(message);
-
                         return ListTile(
                           title: Text(
                             task['title']?.toString() ?? '',
@@ -680,9 +547,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
                                 await crawlService.cancelTask(
                                   taskId.toString(),
                                 );
-
                                 if (!sheetContext.mounted) return;
-
                                 Navigator.pop(sheetContext);
                                 _showAllTasksSheet();
                               } catch (e) {
@@ -711,14 +576,11 @@ class _CrawlScreenState extends State<CrawlScreen> {
       },
     );
   }
-
   // =========================================================
   // PROGRESS
   // =========================================================
-
   void _showProgressSheet(String taskId) {
     _progressTimer?.cancel();
-
     showModalBottomSheet<void>(
       context: context,
       isDismissible: false,
@@ -734,11 +596,8 @@ class _CrawlScreenState extends State<CrawlScreen> {
           onCancel: () async {
             try {
               await crawlService.cancelTask(taskId);
-
               _progressTimer?.cancel();
-
               if (!sheetContext.mounted) return;
-
               Navigator.pop(sheetContext);
               _showSnackBar('Đã gửi yêu cầu dừng.');
             } catch (e) {
@@ -747,7 +606,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
           },
           onClose: () {
             _progressTimer?.cancel();
-
             if (sheetContext.mounted) {
               Navigator.pop(sheetContext);
             }
@@ -759,30 +617,25 @@ class _CrawlScreenState extends State<CrawlScreen> {
       _progressTimer = null;
     });
   }
-
   // =========================================================
   // SEARCH RESULTS
   // =========================================================
-
   Widget _buildSearchResults() {
     if (searching || loadingWebsites) {
       return const Expanded(
         child: Center(child: CircularProgressIndicator()),
       );
     }
-
     if (websites.isEmpty) {
       return const Expanded(
         child: Center(child: Text('Không có website được hỗ trợ')),
       );
     }
-
     if (searchResults.isEmpty) {
       return const Expanded(
         child: Center(child: Text('Nhập tên truyện để tìm kiếm')),
       );
     }
-
     return Expanded(
       child: ListView.separated(
         padding: const EdgeInsets.all(12),
@@ -790,11 +643,9 @@ class _CrawlScreenState extends State<CrawlScreen> {
         separatorBuilder: (_, __) => const SizedBox(height: 8),
         itemBuilder: (context, index) {
           final result = searchResults[index];
-
           final title = result['title']?.toString() ?? '';
           final cover = result['cover']?.toString() ?? '';
           final storyUrl = _getResultUrl(result);
-
           return Card(
             clipBehavior: Clip.antiAlias,
             child: ListTile(
@@ -831,7 +682,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
       ),
     );
   }
-
   Widget _searchCoverPlaceholder() {
     return Container(
       width: 60,
@@ -840,11 +690,9 @@ class _CrawlScreenState extends State<CrawlScreen> {
       child: const Icon(Icons.image_not_supported, color: Colors.grey),
     );
   }
-
   // =========================================================
   // CHAPTER RANGE UI
   // =========================================================
-
   Widget _buildChapterRangeSelector() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -914,15 +762,12 @@ class _CrawlScreenState extends State<CrawlScreen> {
       ),
     );
   }
-
   // =========================================================
   // BUILD
   // =========================================================
-
   @override
   Widget build(BuildContext context) {
     final chapterList = chapters;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Cào truyện'),
@@ -962,7 +807,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
             child: DropdownButtonFormField<String>(
-              value: selectedWebsite,
+              initialValue: selectedWebsite,
               isExpanded: true,
               decoration: InputDecoration(
                 labelText: 'Website cần cào',
@@ -1038,21 +883,17 @@ class _CrawlScreenState extends State<CrawlScreen> {
       ),
     );
   }
-
   // =========================================================
   // STORY HEADER
   // =========================================================
-
   Widget _buildStoryHeader() {
     final chapterList = chapters;
     final cover = data!['cover']?.toString() ?? '';
-
     final storyUrl =
         _currentStoryUrl ??
             data!['url']?.toString() ??
             data!['cleanedUrl']?.toString() ??
             '';
-
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -1109,7 +950,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
       ),
     );
   }
-
   Widget _coverPlaceholder() {
     return Container(
       width: 100,
@@ -1118,14 +958,11 @@ class _CrawlScreenState extends State<CrawlScreen> {
       child: const Icon(Icons.image_not_supported, color: Colors.grey),
     );
   }
-
   // =========================================================
   // SIMILAR STORIES / MERGE SOURCE
   // =========================================================
-
   Widget _buildSimilarStories() {
     final matches = similarStories;
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Card(
@@ -1232,17 +1069,14 @@ class _CrawlScreenState extends State<CrawlScreen> {
       ),
     );
   }
-
   Widget _buildSimilarStoryTile(Map<String, dynamic> story) {
     final storyId = _readStoryId(story['storyId']);
     final title = story['title']?.toString() ?? 'Không có tiêu đề';
     final author = story['author']?.toString() ?? '';
     final cover = story['coverUrl']?.toString() ?? '';
     final similarity = _asDouble(story['similarity']);
-
     final isSelected =
         !_createNewStory && storyId != null && storyId == _selectedStoryId;
-
     return Card(
       elevation: 0,
       margin: const EdgeInsets.only(bottom: 8),
@@ -1301,7 +1135,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
       ),
     );
   }
-
   Widget _similarCoverPlaceholder() {
     return Container(
       width: 48,
@@ -1314,18 +1147,14 @@ class _CrawlScreenState extends State<CrawlScreen> {
       ),
     );
   }
-
   // =========================================================
   // DESCRIPTION
   // =========================================================
-
   Widget _buildDescription() {
     final description = data!['description']?.toString() ?? '';
-
     if (description.isEmpty) {
       return const SizedBox.shrink();
     }
-
     return ExpansionTile(
       tilePadding: EdgeInsets.zero,
       title: const Text(
@@ -1345,18 +1174,14 @@ class _CrawlScreenState extends State<CrawlScreen> {
       ],
     );
   }
-
   // =========================================================
   // INFORMATION
   // =========================================================
-
   Widget _buildInformation() {
     final information = data!['information'] as List? ?? [];
-
     if (information.isEmpty) {
       return const SizedBox.shrink();
     }
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Card(
@@ -1373,14 +1198,11 @@ class _CrawlScreenState extends State<CrawlScreen> {
               child: Column(
                 children: information.map<Widget>((item) {
                   final info = Map<String, dynamic>.from(item as Map);
-
                   final label = info['label']?.toString() ?? '';
                   final value = info['value']?.toString() ?? '';
-
                   if (label.isEmpty && value.isEmpty) {
                     return const SizedBox.shrink();
                   }
-
                   return _buildInfoRow(label, value);
                 }).toList(),
               ),
@@ -1390,7 +1212,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
       ),
     );
   }
-
   Widget _buildInfoRow(String label, String value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 7),
@@ -1410,11 +1231,9 @@ class _CrawlScreenState extends State<CrawlScreen> {
       ),
     );
   }
-
   // =========================================================
   // CHAPTER ACTIONS
   // =========================================================
-
   Widget _buildActionButtons() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1434,11 +1253,9 @@ class _CrawlScreenState extends State<CrawlScreen> {
       ),
     );
   }
-
   // =========================================================
   // CHAPTER LIST
   // =========================================================
-
   Widget _buildChapterList(List chapterList) {
     if (chapterList.isEmpty) {
       return const Padding(
@@ -1446,14 +1263,12 @@ class _CrawlScreenState extends State<CrawlScreen> {
         child: Center(child: Text('Truyện chưa có chương nào')),
       );
     }
-
     return Column(
       children: List.generate(chapterList.length, (index) {
         final chapterOrder = index + 1;
         final chapter = chapterList[index] as Map;
         final title = chapter['title']?.toString() ?? '';
         final isCrawled = _isCrawled(chapter);
-
         return ListTile(
           dense: true,
           leading: SizedBox(
@@ -1502,103 +1317,79 @@ class _CrawlScreenState extends State<CrawlScreen> {
     );
   }
 }
-
 // =============================================================
 // PROGRESS SHEET
 // =============================================================
-
 class _ProgressSheetContent extends StatefulWidget {
   final String taskId;
   final CrawlService crawlService;
   final Future<void> Function() onCancel;
   final VoidCallback onClose;
-
   const _ProgressSheetContent({
     required this.taskId,
     required this.crawlService,
     required this.onCancel,
     required this.onClose,
   });
-
   @override
   State<_ProgressSheetContent> createState() => _ProgressSheetContentState();
 }
-
 class _ProgressSheetContentState extends State<_ProgressSheetContent> {
   Timer? _timer;
-
   Map<String, dynamic>? _task;
   Object? _error;
-
   bool _loading = true;
   bool _canceling = false;
-
   @override
   void initState() {
     super.initState();
-
     _refreshTask();
-
     _timer = Timer.periodic(
       const Duration(seconds: 2),
           (_) => _refreshTask(),
     );
   }
-
   @override
   void dispose() {
     _timer?.cancel();
     super.dispose();
   }
-
   int _asInt(dynamic value) {
     if (value is int) return value;
     if (value is num) return value.toInt();
-
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
-
   bool _isDone(String message) {
     final lower = message.toLowerCase();
-
     return message.contains('Hoàn thành') ||
         message.contains('Lỗi') ||
         lower.contains('hủy') ||
         lower.contains('huỷ');
   }
-
   Future<void> _refreshTask() async {
     try {
       final allTasks = await widget.crawlService.getAllTasks();
-
       if (!mounted) return;
-
       final rawTask = allTasks[widget.taskId];
-
       setState(() {
         _task = rawTask == null
             ? null
             : Map<String, dynamic>.from(rawTask as Map);
-
         _error = null;
         _loading = false;
       });
-
       final message = _task?['message']?.toString() ?? '';
-
       if (_isDone(message)) {
         _timer?.cancel();
       }
     } catch (e) {
       if (!mounted) return;
-
       setState(() {
         _error = e;
         _loading = false;
       });
     }
   }
-
   @override
   Widget build(BuildContext context) {
     if (_loading && _task == null) {
@@ -1607,31 +1398,25 @@ class _ProgressSheetContentState extends State<_ProgressSheetContent> {
         child: Center(child: CircularProgressIndicator()),
       );
     }
-
     if (_error != null && _task == null) {
       return SizedBox(
         height: 220,
         child: Center(child: Text('Lỗi tải tiến độ: $_error')),
       );
     }
-
     if (_task == null) {
       return const SizedBox(
         height: 220,
         child: Center(child: Text('Không tìm thấy task')),
       );
     }
-
     final processed = _asInt(_task!['processed']);
     final total = _asInt(_task!['total']);
-
     final double progress = total > 0
         ? (processed / total).clamp(0.0, 1.0)
         : 0.0;
-
     final message = _task!['message']?.toString() ?? '';
     final isDone = _isDone(message);
-
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -1679,7 +1464,6 @@ class _ProgressSheetContentState extends State<_ProgressSheetContent> {
                         setState(() {
                           _canceling = true;
                         });
-
                         try {
                           await widget.onCancel();
                         } finally {

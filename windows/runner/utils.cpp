@@ -1,12 +1,9 @@
 #include "utils.h"
-
 #include <flutter_windows.h>
 #include <io.h>
 #include <stdio.h>
 #include <windows.h>
-
 #include <iostream>
-
 void CreateAndAttachConsole() {
   if (::AllocConsole()) {
     FILE *unused;
@@ -20,7 +17,6 @@ void CreateAndAttachConsole() {
     FlutterDesktopResyncOutputStreams();
   }
 }
-
 std::vector<std::string> GetCommandLineArguments() {
   // Convert the UTF-16 command line arguments to UTF-8 for the Engine to use.
   int argc;
@@ -28,19 +24,14 @@ std::vector<std::string> GetCommandLineArguments() {
   if (argv == nullptr) {
     return std::vector<std::string>();
   }
-
   std::vector<std::string> command_line_arguments;
-
   // Skip the first argument as it's the binary name.
   for (int i = 1; i < argc; i++) {
     command_line_arguments.push_back(Utf8FromUtf16(argv[i]));
   }
-
   ::LocalFree(argv);
-
   return command_line_arguments;
 }
-
 std::string Utf8FromUtf16(const wchar_t* utf16_string) {
   if (utf16_string == nullptr) {
     return std::string();

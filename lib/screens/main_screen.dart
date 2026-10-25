@@ -7,17 +7,14 @@ import '../models/app_theme_mode.dart';
 class MainScreen extends StatefulWidget {
   final AppThemeMode currentMode;
   final Function(AppThemeMode) onThemeChanged;
-
   const MainScreen({
     super.key,
     required this.currentMode,
     required this.onThemeChanged,
   });
-
   @override
   State<MainScreen> createState() => _MainScreenState();
 }
-
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   @override
@@ -25,7 +22,6 @@ class _MainScreenState extends State<MainScreen> {
     super.initState();
     OtaService().cleanUpOldApk();
   }
-
   @override
   Widget build(BuildContext context) {
     final pages = [
@@ -36,7 +32,6 @@ class _MainScreenState extends State<MainScreen> {
         onThemeChanged: widget.onThemeChanged,
       ),
     ];
-
     return Scaffold(
       body: pages[_selectedIndex],
       bottomNavigationBar: NavigationBar(

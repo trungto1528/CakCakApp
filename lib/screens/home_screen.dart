@@ -1,8 +1,6 @@
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -12,7 +10,6 @@ import 'package:novel_app/screens/story_detail_screen.dart';
 import 'package:novel_app/services/chapter_fetcher.dart';
 import 'package:novel_app/services/story_fetcher.dart';
 import 'package:path_provider/path_provider.dart';
-
 import '../config/api_config.dart';
 import '../models/User.dart';
 import '../offline/service/offline_mode_service.dart';
@@ -20,96 +17,71 @@ import '../route_observer.dart';
 import '../services/app_preference.dart';
 import '../services/auth.dart';
 import 'browse_all_stories_screen.dart';
-
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
-
   @override
   State<HomePage> createState() => _HomePageState();
 }
-
 class _HomePageState extends State<HomePage> with RouteAware {
   String? lastStoryTitle;
   double? lastChapterNumber;
-
   late Future<List<dynamic>> latestStoriesFuture;
-
   Timer? _debounce;
   String keyword = '';
-
   int? userId;
   int? lastStoryId;
   int? lastChapterId;
   String? lastReadCreatedBy;
   String? coverUrl;
-
   final TextEditingController _offlineSearchController =
   TextEditingController();
-
   List<Map<String, dynamic>> _downloadedStories = [];
   bool _loadingDownloadedStories = false;
   String _offlineKeyword = '';
-
   bool get isOffline => OfflineModeService.isOffline.value;
-
   @override
   void initState() {
     super.initState();
-
     OfflineModeService.isOffline.addListener(_onOfflineModeChanged);
-
     latestStoriesFuture = _loadLatestStories();
     _loadLastRead();
-
     if (isOffline) {
       _loadDownloadedStories();
     }
   }
-
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-
     final route = ModalRoute.of(context);
     if (route != null) {
       routeObserver.subscribe(this, route);
     }
   }
-
   @override
   void dispose() {
     _debounce?.cancel();
     _offlineSearchController.dispose();
-
     OfflineModeService.isOffline.removeListener(
       _onOfflineModeChanged,
     );
-
     routeObserver.unsubscribe(this);
     super.dispose();
   }
-
   @override
   void didPopNext() {
     if (!mounted) return;
-
     setState(() {
       latestStoriesFuture = _loadLatestStories();
     });
-
     _loadLastRead();
-
     if (isOffline) {
       _loadDownloadedStories();
     }
   }
-
   void _onOfflineModeChanged() {
     if (!mounted) return;
-
     setState(() {
       latestStoriesFuture = _loadLatestStories();
-
       lastStoryTitle = null;
       lastChapterNumber = null;
       lastStoryId = null;
@@ -117,9 +89,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
       lastReadCreatedBy = null;
       coverUrl = null;
     });
-
     _loadLastRead();
-
     if (isOffline) {
       _loadDownloadedStories();
     } else {
@@ -128,37 +98,29 @@ class _HomePageState extends State<HomePage> with RouteAware {
       });
     }
   }
-
   Future<List<dynamic>> _loadLatestStories() async {
     if (OfflineModeService.isOffline.value) {
       return <dynamic>[];
     }
-
     return StoryFetcher().fetchLatestStories();
   }
-
   Future<void> _loadLastRead() async {
     try {
       final prefs = await AppPreferences.getInstance();
-
       final storedUser = prefs.getString('user');
       int? storedStoryId = prefs.getInt('lastStoryId');
       int? storedChapterId = prefs.getInt('lastChapterId');
       String? storedCreatedBy = prefs.getString('lastReadCreatedBy');
-
       String? storyTitle;
       String? cover;
       double? chapterNumber;
       int? uid;
-
       if (!OfflineModeService.isOffline.value && storedUser != null) {
         var currentUser = User.fromJson(jsonDecode(storedUser));
         uid = currentUser.id;
-
         try {
           final latestUserJson = await Auth().fetchUser(uid);
           currentUser = User.fromJson(jsonDecode(latestUserJson));
-
           if (currentUser.lastReadStoryId != -1 &&
               currentUser.lastReadChapterId != -1 &&
               currentUser.lastReadCreatedBy != 'na') {
@@ -173,7 +135,6 @@ class _HomePageState extends State<HomePage> with RouteAware {
         final currentUser = User.fromJson(jsonDecode(storedUser));
         uid = currentUser.id;
       }
-
       if (!OfflineModeService.isOffline.value &&
           storedStoryId != null &&
           storedChapterId != null &&
@@ -181,15 +142,11 @@ class _HomePageState extends State<HomePage> with RouteAware {
         try {
           final storyData =
           await StoryFetcher().fetchStory(storedStoryId);
-
           storyTitle = storyData['title']?.toString();
           cover = storyData['coverUrl']?.toString();
-
           final chapterData =
           await ChapterFetcher().fetchChapter(storedChapterId);
-
           final rawChapterNumber = chapterData['chapterNumber'];
-
           if (rawChapterNumber is num) {
             chapterNumber = rawChapterNumber.toDouble();
           } else {
@@ -201,9 +158,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
           debugPrint('Không thể tải thông tin đọc gần nhất: $e');
         }
       }
-
       if (!mounted) return;
-
       setState(() {
         userId = uid;
         lastStoryId = storedStoryId;
@@ -217,7 +172,6 @@ class _HomePageState extends State<HomePage> with RouteAware {
       debugPrint('Lỗi tải thông tin đọc gần nhất: $e');
     }
   }
-
   Widget _buildOfflineModeButton() {
     return ValueListenableBuilder<bool>(
       valueListenable: OfflineModeService.isOffline,
@@ -236,7 +190,6 @@ class _HomePageState extends State<HomePage> with RouteAware {
       },
     );
   }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -262,69 +215,51 @@ class _HomePageState extends State<HomePage> with RouteAware {
       body: isOffline ? _buildOfflineHome() : buildHome(),
     );
   }
-
   // ==================== OFFLINE HOME ====================
-
   Future<void> _loadDownloadedStories() async {
     if (!mounted) return;
-
     setState(() {
       _loadingDownloadedStories = true;
     });
-
     try {
       final appDir = await getApplicationSupportDirectory();
-
       final storiesDir = Directory(
         '${appDir.path}${Platform.pathSeparator}offline_stories',
       );
-
       if (!await storiesDir.exists()) {
         if (!mounted) return;
-
         setState(() {
           _downloadedStories = [];
           _loadingDownloadedStories = false;
         });
         return;
       }
-
       final stories = <Map<String, dynamic>>[];
-
       await for (final entity in storiesDir.list()) {
         if (entity is! Directory) continue;
-
         final separator = Platform.pathSeparator;
-
         final completeFile = File(
           '${entity.path}${separator}complete.json',
         );
-
         final metadataFile = File(
           '${entity.path}${separator}metadata.json',
         );
-
         if (!await completeFile.exists() ||
             !await metadataFile.exists()) {
           continue;
         }
-
         try {
           final completeJson = jsonDecode(
             await completeFile.readAsString(),
           );
-
           final metadataJson = jsonDecode(
             await metadataFile.readAsString(),
           );
-
           if (completeJson is! Map || metadataJson is! Map) {
             continue;
           }
-
           final complete = Map<String, dynamic>.from(completeJson);
           final metadata = Map<String, dynamic>.from(metadataJson);
-
           final storyId = int.tryParse(
             (metadata['id'] ?? '').toString(),
           ) ??
@@ -336,9 +271,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
                     ? entity.uri.pathSegments.last
                     : '',
               );
-
           if (storyId == null) continue;
-
           stories.add({
             ...metadata,
             'id': storyId,
@@ -355,41 +288,31 @@ class _HomePageState extends State<HomePage> with RouteAware {
           );
         }
       }
-
       stories.sort((a, b) {
         final titleA = (a['title'] ?? '').toString().toLowerCase();
         final titleB = (b['title'] ?? '').toString().toLowerCase();
-
         return titleA.compareTo(titleB);
       });
-
       if (!mounted) return;
-
       setState(() {
         _downloadedStories = stories;
         _loadingDownloadedStories = false;
       });
     } catch (e) {
       debugPrint('Lỗi đọc danh sách truyện offline: $e');
-
       if (!mounted) return;
-
       setState(() {
         _loadingDownloadedStories = false;
       });
     }
   }
-
   Widget _buildOfflineHome() {
     final search = _offlineKeyword.trim().toLowerCase();
-
     final filteredStories = _downloadedStories.where((story) {
       final title = (story['title'] ?? '').toString().toLowerCase();
       final author = (story['author'] ?? '').toString().toLowerCase();
-
       return title.contains(search) || author.contains(search);
     }).toList();
-
     return Column(
       children: [
         Padding(
@@ -410,7 +333,6 @@ class _HomePageState extends State<HomePage> with RouteAware {
                 icon: const Icon(Icons.clear),
                 onPressed: () {
                   _offlineSearchController.clear();
-
                   setState(() {
                     _offlineKeyword = '';
                   });
@@ -487,7 +409,6 @@ class _HomePageState extends State<HomePage> with RouteAware {
               final isWindows = !kIsWeb &&
                   defaultTargetPlatform ==
                       TargetPlatform.windows;
-
               if (isWindows && constraints.maxWidth >= 650) {
                 return GridView.builder(
                   padding: const EdgeInsets.all(12),
@@ -506,7 +427,6 @@ class _HomePageState extends State<HomePage> with RouteAware {
                   },
                 );
               }
-
               return ListView.builder(
                 padding: const EdgeInsets.fromLTRB(
                   12,
@@ -527,13 +447,11 @@ class _HomePageState extends State<HomePage> with RouteAware {
       ],
     );
   }
-
   Widget _buildOfflineStoryCard(
       Map<String, dynamic> story,
       ) {
     final title = (story['title'] ?? 'Chưa có tên').toString();
     final author = (story['author'] ?? 'Chưa rõ tác giả').toString();
-
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       clipBehavior: Clip.antiAlias,
@@ -591,23 +509,18 @@ class _HomePageState extends State<HomePage> with RouteAware {
       ),
     );
   }
-
   Widget _buildOfflineCover(Map<String, dynamic> story) {
     final storyDir = story['localPath']?.toString();
-
     if (storyDir == null || storyDir.isEmpty) {
       return _offlineCoverPlaceholder();
     }
-
     final coverDir = Directory(
       '$storyDir${Platform.pathSeparator}cover',
     );
-
     return FutureBuilder<List<File>>(
       future: _loadOfflineCoverFiles(coverDir),
       builder: (context, snapshot) {
         final files = snapshot.data;
-
         if (files != null && files.isNotEmpty) {
           return Image.file(
             files.first,
@@ -617,7 +530,6 @@ class _HomePageState extends State<HomePage> with RouteAware {
             errorBuilder: (_, __, ___) => _offlineCoverPlaceholder(),
           );
         }
-
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const SizedBox(
             width: 70,
@@ -627,12 +539,10 @@ class _HomePageState extends State<HomePage> with RouteAware {
             ),
           );
         }
-
         return _offlineCoverPlaceholder();
       },
     );
   }
-
   Future<List<File>> _loadOfflineCoverFiles(
       Directory coverDir,
       ) async {
@@ -640,35 +550,26 @@ class _HomePageState extends State<HomePage> with RouteAware {
       debugPrint('Không tồn tại thư mục ảnh bìa: ${coverDir.path}');
       return [];
     }
-
     final files = <File>[];
-
     await for (final entity in coverDir.list()) {
       if (entity is! File) continue;
-
       final path = entity.path.toLowerCase();
-
       final isImage = path.endsWith('.jpg') ||
           path.endsWith('.jpeg') ||
           path.endsWith('.png') ||
           path.endsWith('.webp') ||
           path.endsWith('.gif') ||
           path.endsWith('.bmp');
-
       if (isImage && await entity.length() > 0) {
         files.add(entity);
       }
     }
-
     files.sort((a, b) => a.path.compareTo(b.path));
-
     if (files.isEmpty) {
       debugPrint('Không tìm thấy ảnh bìa trong: ${coverDir.path}');
     }
-
     return files;
   }
-
   Widget _offlineCoverPlaceholder() {
     return const SizedBox(
       width: 70,
@@ -681,9 +582,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
       ),
     );
   }
-
   // ==================== ONLINE HOME ====================
-
   Widget buildHome() {
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -804,7 +703,6 @@ class _HomePageState extends State<HomePage> with RouteAware {
                 ),
               );
             }
-
             if (snapshot.hasError) {
               return const Center(
                 child: Padding(
@@ -813,9 +711,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
                 ),
               );
             }
-
             final stories = snapshot.data ?? [];
-
             if (stories.isEmpty) {
               return const Center(
                 child: Padding(
@@ -824,15 +720,12 @@ class _HomePageState extends State<HomePage> with RouteAware {
                 ),
               );
             }
-
             return LayoutBuilder(
               builder: (context, constraints) {
                 final isWindows = !kIsWeb &&
                     defaultTargetPlatform == TargetPlatform.windows;
-
                 final useGrid =
                     isWindows && constraints.maxWidth >= 650;
-
                 if (!useGrid) {
                   return Column(
                     children: stories.map((story) {
@@ -840,7 +733,6 @@ class _HomePageState extends State<HomePage> with RouteAware {
                     }).toList(),
                   );
                 }
-
                 return GridView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
@@ -863,13 +755,11 @@ class _HomePageState extends State<HomePage> with RouteAware {
       ],
     );
   }
-
   Widget _buildStoryListItem(dynamic story) {
     final title = story['title']?.toString() ?? 'Chưa có tên';
     final author = story['author']?.toString() ?? 'Chưa rõ tác giả';
     final latestChapter = story['latestChapter']?.toString() ?? '?';
     final cover = story['coverUrl']?.toString() ?? '';
-
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       clipBehavior: Clip.antiAlias,
@@ -909,13 +799,11 @@ class _HomePageState extends State<HomePage> with RouteAware {
       ),
     );
   }
-
   Widget _buildStoryGridItem(dynamic story) {
     final title = story['title']?.toString() ?? 'Chưa có tên';
     final author = story['author']?.toString() ?? 'Chưa rõ tác giả';
     final latestChapter = story['latestChapter']?.toString() ?? '?';
     final cover = story['coverUrl']?.toString() ?? '';
-
     return Card(
       margin: EdgeInsets.zero,
       clipBehavior: Clip.antiAlias,
@@ -985,7 +873,6 @@ class _HomePageState extends State<HomePage> with RouteAware {
       ),
     );
   }
-
   void _openStory(dynamic story) {
     Navigator.push(
       context,

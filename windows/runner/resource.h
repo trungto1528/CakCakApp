@@ -3,7 +3,6 @@
 // Used by Runner.rc
 //
 #define IDI_APP_ICON                    101
-
 // Next default values for new objects
 //
 #ifdef APSTUDIO_INVOKED

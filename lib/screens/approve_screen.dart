@@ -1,80 +1,63 @@
 import 'package:flutter/material.dart';
 import '../services/story_fetcher.dart';
 import '../services/chapter_fetcher.dart';
-
 class AdminApproveScreen extends StatefulWidget {
   final int adminId;
-
   const AdminApproveScreen({super.key, required this.adminId});
-
   @override
   State<AdminApproveScreen> createState() => _AdminApproveScreenState();
 }
-
 class _AdminApproveScreenState extends State<AdminApproveScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-
   List stories = [];
   List chapters = [];
-
   bool loadingStories = true;
   bool loadingChapters = true;
-
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _loadData();
   }
-
   Future<void> _loadData() async {
     await Future.wait([
       _loadStories(),
       _loadChapters(),
     ]);
   }
-
   Future<void> _loadStories() async {
     setState(() => loadingStories = true);
-
     try {
       final data = await StoryFetcher().getAllStories(widget.adminId);
-
       setState(() {
-        stories = data ?? [];
+        stories = data;
         loadingStories = false;
       });
     } catch (e) {
       setState(() => loadingStories = false);
     }
   }
-
   Future<void> _loadChapters() async {
     setState(() => loadingChapters = true);
-
     try {
       final data = await ChapterFetcher().getPendingChapters();
-
       setState(() {
-        chapters = data ?? [];
+        chapters = data;
         loadingChapters = false;
       });
     } catch (e) {
       setState(() => loadingChapters = false);
     }
   }
-
   Future<void> _approveStory(int id) async {
     await StoryFetcher().approveStory(widget.adminId, id);
     await _loadStories();
   }
-
   Future<void> _approveChapter(int id) async {
     await ChapterFetcher().approveChapter(widget.adminId, id);
     await _loadChapters();
   }
-
   Color _statusColor(String? status) {
     switch (status) {
       case "APPROVED":
@@ -85,7 +68,6 @@ class _AdminApproveScreenState extends State<AdminApproveScreen>
         return Colors.grey;
     }
   }
-
   Widget _statusBadge(String status) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -102,7 +84,6 @@ class _AdminApproveScreenState extends State<AdminApproveScreen>
       ),
     );
   }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -119,7 +100,6 @@ class _AdminApproveScreenState extends State<AdminApproveScreen>
       body: TabBarView(
         controller: _tabController,
         children: [
-
           // ================= STORIES =================
           loadingStories
               ? const Center(child: CircularProgressIndicator())
@@ -130,13 +110,11 @@ class _AdminApproveScreenState extends State<AdminApproveScreen>
             itemBuilder: (context, i) {
               final s = stories[i];
               final status = s["status"] ?? "UNKNOWN";
-
               return Card(
                 margin: const EdgeInsets.all(8),
                 child: ListTile(
                   title: Text(s["title"] ?? "No title"),
                   subtitle: _statusBadge(status),
-
                   trailing: status == "PENDING"
                       ? IconButton(
                     icon: const Icon(
@@ -153,7 +131,6 @@ class _AdminApproveScreenState extends State<AdminApproveScreen>
               );
             },
           ),
-
           // ================= CHAPTERS =================
           loadingChapters
               ? const Center(child: CircularProgressIndicator())
@@ -164,7 +141,6 @@ class _AdminApproveScreenState extends State<AdminApproveScreen>
             itemBuilder: (context, i) {
               final c = chapters[i];
               final status = c["status"] ?? "UNKNOWN";
-
               return Card(
                 margin: const EdgeInsets.all(8),
                 child: ListTile(
@@ -178,7 +154,6 @@ class _AdminApproveScreenState extends State<AdminApproveScreen>
                       _statusBadge(status),
                     ],
                   ),
-
                   trailing: status == "PENDING"
                       ? IconButton(
                     icon: const Icon(
