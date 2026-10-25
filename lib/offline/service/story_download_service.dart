@@ -51,7 +51,7 @@ class StoryDownloadService {
 
   static final StoryDownloadService instance = StoryDownloadService._();
 
-  static const int _maxConcurrentImages = 16;
+  static const int _maxConcurrentImages = 128;
   static const Duration _packageTimeout = Duration(seconds: 60);
   static const Duration _imageTimeout = Duration(seconds: 30);
   static const int _maxAttempts = 5;
