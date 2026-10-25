@@ -269,6 +269,58 @@ class StoryFetcher {
     return null;
   }
 
+  /// Lấy trang truyện với pagination.
+  /// Lấy một trang truyện và metadata phân trang từ backend.
+  Future<Map<String, dynamic>> fetchStoriesPage(
+      int page,
+      int limit,
+      ) async {
+    final uri = Uri.parse('${ApiConfig.api}/stories/page').replace(
+      queryParameters: {
+        'page': page.toString(),
+        'limit': limit.toString(),
+      },
+    );
+
+    final res = await http.get(uri);
+
+    if (res.statusCode != 200) {
+      throw Exception(
+        'Không thể tải trang truyện: HTTP ${res.statusCode}',
+      );
+    }
+
+    final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+
+    if (decoded is! Map) {
+      throw Exception('Dữ liệu phân trang không hợp lệ.');
+    }
+
+    final data = Map<String, dynamic>.from(decoded);
+    final rawStories = data['stories'];
+
+    if (rawStories is! List) {
+      throw Exception('Backend không trả về danh sách stories hợp lệ.');
+    }
+
+    return {
+      'stories': rawStories
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList(),
+      'page': data['page'] is num
+          ? (data['page'] as num).toInt()
+          : page,
+      'limit': data['limit'] is num
+          ? (data['limit'] as num).toInt()
+          : limit,
+      'totalElements': data['totalElements'],
+      'totalPages': data['totalPages'],
+      'hasNext': data['hasNext'] == true,
+      'hasPrevious': data['hasPrevious'] == true,
+    };
+  }
+
   /// Lấy danh sách truyện cập nhật gần đây.
   ///
   /// Khi Offline, dùng cache danh sách đã lưu trước đó.

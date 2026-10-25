@@ -19,6 +19,7 @@ import '../offline/service/offline_mode_service.dart';
 import '../route_observer.dart';
 import '../services/app_preference.dart';
 import '../services/auth.dart';
+import 'browse_all_stories_screen.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -768,12 +769,28 @@ class _HomePageState extends State<HomePage> with RouteAware {
           ),
         ],
         const SizedBox(height: 24),
-        const Text(
-          'Mới cập nhật',
-          style: TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-          ),
+        Row(
+          children: [
+            const Text(
+              'Mới cập nhật',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const Spacer(),
+            TextButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const BrowseAllStoriesScreen(),
+                  ),
+                );
+              },
+              child: const Text('Xem tất cả'),
+            ),
+          ],
         ),
         const SizedBox(height: 12),
         FutureBuilder<List<dynamic>>(

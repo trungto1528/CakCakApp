@@ -32,6 +32,9 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
 
   Timer? _taskRefreshTimer;
 
+  // Lưu nguồn đang chọn riêng cho từng truyện.
+  final Map<int, String> _selectedSourcesByStory = {};
+
   @override
   void initState() {
     super.initState();
@@ -40,7 +43,7 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
 
     _taskRefreshTimer = Timer.periodic(
       const Duration(seconds: 3),
-          (_) => _refreshRunningTasks(),
+      (_) => _refreshRunningTasks(),
     );
   }
 
@@ -91,7 +94,13 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
 
       if (!mounted) return;
 
-      final chapters = List.from(data?['chapters'] ?? []);
+      final rawChapters = data?['chapters'];
+      final chapters = rawChapters is List
+          ? rawChapters
+                .whereType<Map>()
+                .map((chapter) => Map<String, dynamic>.from(chapter))
+                .toList()
+          : <Map<String, dynamic>>[];
 
       chapters.sort((a, b) {
         if (a['status'] == 'PENDING' && b['status'] != 'PENDING') {
@@ -106,7 +115,27 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
         return aNumber.compareTo(bNumber);
       });
 
-      setState(() => storyChapters[storyId] = chapters);
+      final sources = <String>{};
+      for (final chapter in chapters) {
+        final source = '${chapter['createdBy'] ?? ''}'.trim();
+        sources.add(source.isEmpty ? 'Không rõ nguồn' : source);
+      }
+
+      final sortedSources = sources.toList()..sort();
+
+      setState(() {
+        storyChapters[storyId] = chapters;
+
+        final selectedSource = _selectedSourcesByStory[storyId];
+
+        if (sortedSources.isEmpty) {
+          _selectedSourcesByStory.remove(storyId);
+        } else if (selectedSource == null ||
+            !sortedSources.contains(selectedSource)) {
+          // Mặc định chọn nguồn đầu tiên khi mở truyện lần đầu.
+          _selectedSourcesByStory[storyId] = sortedSources.first;
+        }
+      });
     } catch (e) {
       debugPrint('Không thể tải chapter của truyện $storyId: $e');
     }
@@ -196,7 +225,7 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
     if (!mounted || isLoadingTasks) return;
 
     final hasRunningTask = updateTasks.any(
-          (task) => _isRunning(task['status']),
+      (task) => _isRunning(task['status']),
     );
 
     if (hasRunningTask) {
@@ -264,26 +293,24 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
                     : updateTasks.isEmpty
                     ? const Center(child: Text('Chưa có task nào'))
                     : ListView.separated(
-                  itemCount: updateTasks.length,
-                  separatorBuilder: (_, __) =>
-                  const Divider(height: 20),
-                  itemBuilder: (context, index) {
-                    final task = updateTasks[index];
+                        itemCount: updateTasks.length,
+                        separatorBuilder: (_, __) => const Divider(height: 20),
+                        itemBuilder: (context, index) {
+                          final task = updateTasks[index];
 
-                    return _buildTaskCard(
-                      task,
-                      onTap: () {
-                        final taskId =
-                        task['taskId']?.toString();
+                          return _buildTaskCard(
+                            task,
+                            onTap: () {
+                              final taskId = task['taskId']?.toString();
 
-                        if (taskId != null && taskId.isNotEmpty) {
-                          Navigator.pop(dialogContext);
-                          _showTaskDetails(taskId);
-                        }
-                      },
-                    );
-                  },
-                ),
+                              if (taskId != null && taskId.isNotEmpty) {
+                                Navigator.pop(dialogContext);
+                                _showTaskDetails(taskId);
+                              }
+                            },
+                          );
+                        },
+                      ),
               ),
               actions: [
                 TextButton(
@@ -298,16 +325,12 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
     );
   }
 
-  Widget _buildTaskCard(
-      Map<String, dynamic> task, {
-        VoidCallback? onTap,
-      }) {
+  Widget _buildTaskCard(Map<String, dynamic> task, {VoidCallback? onTap}) {
     final taskId = '${task['taskId'] ?? 'Không rõ'}';
     final status = '${task['status'] ?? 'UNKNOWN'}';
     final processed = _asInt(task['processed']);
     final total = _asInt(task['total']);
-    final progress =
-    total > 0 ? (processed / total).clamp(0.0, 1.0) : 0.0;
+    final progress = total > 0 ? (processed / total).clamp(0.0, 1.0) : 0.0;
 
     final storyId = task['storyId'];
     final message = '${task['message'] ?? 'Không có thông báo'}';
@@ -425,6 +448,109 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
     return int.tryParse('$value') ?? 0;
   }
 
+  List<DropdownMenuItem<String>> _buildSourceDropdownItems(int storyId) {
+    final chapters = storyChapters[storyId] ?? [];
+    final sources = <String>{};
+
+    for (final chapter in chapters) {
+      final source = '${chapter['createdBy'] ?? ''}'.trim();
+      sources.add(source.isEmpty ? 'Không rõ nguồn' : source);
+    }
+
+    final sortedSources = sources.toList()..sort();
+
+    return sortedSources.map((source) {
+      return DropdownMenuItem<String>(
+        value: source,
+        child: Text(source, overflow: TextOverflow.ellipsis),
+      );
+    }).toList();
+  }
+
+  Widget _buildDeleteSourceButton(int storyId) {
+    final selectedSource = _selectedSourcesByStory[storyId];
+
+    if (selectedSource == null || selectedSource.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return IconButton(
+      icon: const Icon(Icons.delete, color: Colors.red),
+      tooltip: 'Xóa chapter của nguồn $selectedSource trong truyện này',
+      onPressed: () => _confirmDeleteSourceChapters(storyId, selectedSource),
+    );
+  }
+
+  void _confirmDeleteSourceChapters(int storyId, String sourceName) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Xóa chapter của nguồn'),
+        content: Text(
+          'Bạn có chắc muốn xóa tất cả chapter của nguồn '
+          '$sourceName trong truyện ID $storyId?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Hủy'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _deleteChaptersOfSource(storyId, sourceName);
+            },
+            child: const Text('Xóa', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteChaptersOfSource(int storyId, String sourceName) async {
+    final chapters = List<Map<String, dynamic>>.from(
+      storyChapters[storyId] ?? [],
+    );
+
+    final targets = chapters.where((chapter) {
+      final source = '${chapter['createdBy'] ?? ''}'.trim();
+      final normalizedSource = source.isEmpty ? 'Không rõ nguồn' : source;
+
+      return normalizedSource == sourceName;
+    }).toList();
+
+    var deleted = 0;
+    var failed = 0;
+
+    for (final chapter in targets) {
+      final chapterId = _asInt(chapter['id']);
+
+      if (chapterId <= 0) {
+        failed++;
+        continue;
+      }
+
+      try {
+        await ChapterFetcher().deleteChapter(chapterId, widget.adminId);
+        deleted++;
+      } catch (e) {
+        failed++;
+        debugPrint('Lỗi xóa chapter $chapterId: $e');
+      }
+    }
+
+    if (!mounted) return;
+
+    await _loadChapters(storyId);
+
+    if (!mounted) return;
+
+    _showMessage(
+      'Đã xóa $deleted chapter của nguồn $sourceName'
+      '${failed > 0 ? ', lỗi $failed chapter' : ''}.',
+    );
+  }
+
   // ============================================================
   // CHAPTER DETAIL
   // ============================================================
@@ -445,26 +571,31 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
             width: 700,
             height: 500,
             child: ListView(
-              children: (chapter['blocks'] as List).map<Widget>((block) {
-                if (block['type'] == 'text') {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text('${block['data'] ?? ''}'),
-                  );
-                }
+              children:
+                  ((chapter['blocks'] is List)
+                          ? chapter['blocks'] as List
+                          : <dynamic>[])
+                      .map<Widget>((block) {
+                        if (block is Map && block['type'] == 'text') {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Text('${block['data'] ?? ''}'),
+                          );
+                        }
 
-                if (block['type'] == 'image') {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: CachedNetworkImage(
-                      imageUrl:
-                      '${ApiConfig.chapterImage}/${block['data']}',
-                    ),
-                  );
-                }
+                        if (block is Map && block['type'] == 'image') {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: CachedNetworkImage(
+                              imageUrl:
+                                  '${ApiConfig.chapterImage}/${block['data']}',
+                            ),
+                          );
+                        }
 
-                return const SizedBox.shrink();
-              }).toList(),
+                        return const SizedBox.shrink();
+                      })
+                      .toList(),
             ),
           ),
           actions: [
@@ -618,9 +749,9 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
   void _showMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   // ============================================================
@@ -645,10 +776,10 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
                 onPressed: isCheckingAll ? null : _checkAllUpdates,
                 icon: isCheckingAll
                     ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : const Icon(Icons.sync),
                 label: const Text('Kiểm tra tất cả'),
               ),
@@ -658,135 +789,148 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-        onRefresh: _loadStories,
-        child: ListView.builder(
-          padding: const EdgeInsets.all(10),
-          itemCount: stories.length,
-          itemBuilder: (context, index) {
-            final story = stories[index];
-            final id = _asInt(story['id']);
-            final title = '${story['title'] ?? ''}';
+          : Column(
+              children: [
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _loadStories,
+                    child: ListView.builder(
+                      padding: const EdgeInsets.all(10),
+                      itemCount: stories.length,
+                      itemBuilder: (context, index) {
+                        final story = stories[index];
+                        final id = _asInt(story['id']);
+                        final title = '${story['title'] ?? ''}';
 
-            return Card(
-              elevation: 3,
-              margin: const EdgeInsets.symmetric(vertical: 6),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: ExpansionTile(
-                tilePadding: const EdgeInsets.all(10),
-                title: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: CachedNetworkImage(
-                        width: 60,
-                        height: 90,
-                        fit: BoxFit.cover,
-                        imageUrl:
-                        '${ApiConfig.coverImage}/${story['coverUrl'] ?? ''}',
-                        placeholder: (_, __) => const SizedBox(
-                          width: 60,
-                          height: 90,
-                          child: Center(
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                            ),
+                        return Card(
+                          elevation: 3,
+                          margin: const EdgeInsets.symmetric(vertical: 6),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                        ),
-                        errorWidget: (_, __, ___) => const SizedBox(
-                          width: 60,
-                          height: 90,
-                          child: Icon(Icons.image, size: 40),
-                        ),
-                      ),
+                          child: ExpansionTile(
+                            tilePadding: const EdgeInsets.all(10),
+                            title: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: CachedNetworkImage(
+                                    width: 60,
+                                    height: 90,
+                                    fit: BoxFit.cover,
+                                    imageUrl:
+                                        '${ApiConfig.coverImage}/${story['coverUrl'] ?? ''}',
+                                    placeholder: (_, __) => const SizedBox(
+                                      width: 60,
+                                      height: 90,
+                                      child: Center(
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      ),
+                                    ),
+                                    errorWidget: (_, __, ___) => const SizedBox(
+                                      width: 60,
+                                      height: 90,
+                                      child: Icon(Icons.image, size: 40),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        title,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'ID: $id',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey.shade600,
+                                        ),
+                                      ),
+                                      Text(
+                                        'Tạo bởi: ${story['createdBy'] ?? 'Unknown'}',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey.shade600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      _buildStoryStatus(
+                                        '${story['status'] ?? 'UNKNOWN'}',
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            onExpansionChanged: (expanded) {
+                              if (expanded && !storyChapters.containsKey(id)) {
+                                _loadChapters(id);
+                              }
+                            },
+                            trailing: SizedBox(
+                              width: 100,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    tooltip: 'Kiểm tra cập nhật',
+                                    onPressed: () => _checkStoryUpdates(id),
+                                    icon: const Icon(
+                                      Icons.sync,
+                                      color: Colors.blue,
+                                    ),
+                                  ),
+                                  if (story['status'] == 'PENDING') ...[
+                                    IconButton(
+                                      tooltip: 'Duyệt truyện',
+                                      onPressed: () => _approveStory(id),
+                                      icon: const Icon(
+                                        Icons.check,
+                                        color: Colors.green,
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Từ chối truyện',
+                                      onPressed: () => _confirmRejectStory(id),
+                                      icon: const Icon(
+                                        Icons.close,
+                                        color: Colors.orange,
+                                      ),
+                                    ),
+                                  ],
+                                  IconButton(
+                                    tooltip: 'Xoá truyện',
+                                    onPressed: () => _confirmDeleteStory(id),
+                                    icon: const Icon(
+                                      Icons.delete,
+                                      color: Colors.red,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            children: _buildChapters(id),
+                          ),
+                        );
+                      },
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'ID: $id',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-                          Text(
-                            'Tạo bởi: ${story['createdByName'] ?? 'Unknown'}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          _buildStoryStatus(
-                            '${story['status'] ?? 'UNKNOWN'}',
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                onExpansionChanged: (expanded) {
-                  if (expanded && !storyChapters.containsKey(id)) {
-                    _loadChapters(id);
-                  }
-                },
-                trailing: SizedBox(
-                  width: 100,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        tooltip: 'Kiểm tra cập nhật',
-                        onPressed: () => _checkStoryUpdates(id),
-                        icon: const Icon(Icons.sync, color: Colors.blue),
-                      ),
-                      if (story['status'] == 'PENDING') ...[
-                        IconButton(
-                          tooltip: 'Duyệt truyện',
-                          onPressed: () => _approveStory(id),
-                          icon: const Icon(
-                            Icons.check,
-                            color: Colors.green,
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Từ chối truyện',
-                          onPressed: () => _confirmRejectStory(id),
-                          icon: const Icon(
-                            Icons.close,
-                            color: Colors.orange,
-                          ),
-                        ),
-                      ],
-                      IconButton(
-                        tooltip: 'Xoá truyện',
-                        onPressed: () => _confirmDeleteStory(id),
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                      ),
-                    ],
                   ),
                 ),
-                children: _buildChapters(id),
-              ),
-            );
-          },
-        ),
-      ),
+              ],
+            ),
     );
   }
 
@@ -810,57 +954,115 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
       return const [
         Padding(
           padding: EdgeInsets.all(12),
-          child: Text('Chưa có chương nào'),
+          child: Text('Truyện chưa có chapter nào'),
         ),
       ];
     }
 
-    return chapters.map<Widget>((chapter) {
-      final chapterId = _asInt(chapter['id']);
-      final status = '${chapter['status'] ?? 'UNKNOWN'}';
+    final sourceItems = _buildSourceDropdownItems(storyId);
+    final sources = sourceItems
+        .map((item) => item.value)
+        .whereType<String>()
+        .toList();
 
-      return Container(
-        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          color: Colors.grey.withValues(alpha: 0.05),
+    if (sources.isEmpty) {
+      return const [
+        Padding(
+          padding: EdgeInsets.all(12),
+          child: Text('Không tìm thấy nguồn của chapter'),
         ),
-        child: ListTile(
-          onTap: () => _viewChapter(chapterId),
-          title: Text(
-            'Chương ${chapter['chapterNumber']}: ${chapter['title'] ?? ''}',
-            style: const TextStyle(fontWeight: FontWeight.w500),
-          ),
-          subtitle: Text('${chapter['createdByName'] ?? ''}'),
-          trailing: Wrap(
-            spacing: 4,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              _buildStoryStatus(status),
-              if (status == 'PENDING') ...[
+      ];
+    }
+
+    final storedSource = _selectedSourcesByStory[storyId];
+    final selectedSource =
+        storedSource != null && sources.contains(storedSource)
+        ? storedSource
+        : sources.first;
+
+    final filteredChapters = chapters.where((chapter) {
+      final source = '${chapter['createdBy'] ?? ''}'.trim();
+      final normalizedSource = source.isEmpty ? 'Không rõ nguồn' : source;
+
+      return normalizedSource == selectedSource;
+    }).toList();
+
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+        child: Row(
+          children: [
+            const Text(
+              'Nguồn:',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: DropdownButton<String>(
+                value: selectedSource,
+                isExpanded: true,
+                items: sourceItems,
+                onChanged: (String? newValue) {
+                  if (newValue == null) return;
+
+                  setState(() {
+                    _selectedSourcesByStory[storyId] = newValue;
+                  });
+                },
+              ),
+            ),
+            _buildDeleteSourceButton(storyId),
+          ],
+        ),
+      ),
+      if (filteredChapters.isEmpty)
+        const Padding(
+          padding: EdgeInsets.all(12),
+          child: Text('Nguồn này chưa có chapter nào'),
+        )
+      else
+        ...filteredChapters.map((chapter) {
+          final chapterId = _asInt(chapter['id']);
+          final status = '${chapter['status'] ?? 'UNKNOWN'}';
+
+          return ListTile(
+            title: Text(
+              'Chương ${chapter['chapterNumber']}: ${chapter['title'] ?? ''}',
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
+            subtitle: Text('${chapter['createdBy'] ?? 'Không rõ nguồn'}'),
+            trailing: Wrap(
+              spacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                _buildStoryStatus(status),
+                if (status == 'PENDING') ...[
+                  IconButton(
+                    tooltip: 'Duyệt chapter',
+                    onPressed: () => _approveChapter(storyId, chapterId),
+                    icon: const Icon(Icons.check, color: Colors.green),
+                  ),
+                  IconButton(
+                    tooltip: 'Từ chối chapter',
+                    onPressed: () => _rejectChapter(storyId, chapterId),
+                    icon: const Icon(Icons.close, color: Colors.orange),
+                  ),
+                ],
                 IconButton(
-                  tooltip: 'Duyệt chương',
-                  onPressed: () => _approveChapter(storyId, chapterId),
-                  icon: const Icon(Icons.check, color: Colors.green),
-                ),
-                IconButton(
-                  tooltip: 'Từ chối chương',
-                  onPressed: () => _rejectChapter(storyId, chapterId),
-                  icon: const Icon(Icons.close, color: Colors.orange),
+                  tooltip: 'Xóa chapter',
+                  onPressed: () => _confirmDeleteChapter(storyId, chapterId),
+                  icon: const Icon(Icons.delete, color: Colors.red),
                 ),
               ],
-              IconButton(
-                tooltip: 'Xoá chương',
-                onPressed: () =>
-                    _confirmDeleteChapter(storyId, chapterId),
-                icon: const Icon(Icons.delete, color: Colors.red),
-              ),
-            ],
-          ),
-        ),
-      );
-    }).toList();
+            ),
+          );
+        }),
+    ];
   }
+
+  // ============================================================
+  // SOURCE MANAGEMENT
+  // ============================================================
 
   // ============================================================
   // STATUS
@@ -994,9 +1196,7 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
   }
 
   /// Chuẩn bị payload theo API /import-selected.
-  Map<String, dynamic> _buildImportPayload(
-      Map<String, dynamic> result,
-      ) {
+  Map<String, dynamic> _buildImportPayload(Map<String, dynamic> result) {
     final sourceUrl = '${result['sourceUrl'] ?? ''}'.trim();
 
     if (sourceUrl.isEmpty) {
@@ -1009,7 +1209,7 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
     if (rawStoryId == null || storyId <= 0) {
       throw Exception(
         'Kết quả không có storyId hợp lệ. '
-            'Backend cần trả storyId trong mỗi kết quả kiểm tra.',
+        'Backend cần trả storyId trong mỗi kết quả kiểm tra.',
       );
     }
 
@@ -1123,17 +1323,12 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
         try {
           final payload = _buildImportPayload(result);
 
-          await CrawlService().importStory(
-            payload,
-            widget.adminId,
-          );
+          await CrawlService().importStory(payload, widget.adminId);
 
           succeeded++;
         } catch (e) {
           failed++;
-          debugPrint(
-            'Crawl lỗi nguồn ${result['sourceUrl']}: $e',
-          );
+          debugPrint('Crawl lỗi nguồn ${result['sourceUrl']}: $e');
         } finally {
           if (mounted) {
             setState(() => crawlingSources.remove(sourceKey));
@@ -1145,7 +1340,7 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
 
       _showDialogMessage(
         'Đã gửi crawl tuần tự: $succeeded nguồn thành công, '
-            '$failed nguồn lỗi.',
+        '$failed nguồn lỗi.',
       );
     } finally {
       if (mounted) {
@@ -1157,9 +1352,9 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
   void _showDialogMessage(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   // ============================================================
@@ -1178,8 +1373,7 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
     if (cover.startsWith('https://') || cover.startsWith('http://')) {
       imageUrl = cover;
     } else {
-      final baseUrl =
-      ApiConfig.coverImage.replaceAll(RegExp(r'/+$'), '');
+      final baseUrl = ApiConfig.coverImage.replaceAll(RegExp(r'/+$'), '');
       final path = cover.replaceAll(RegExp(r'^/+'), '');
       imageUrl = '$baseUrl/$path';
     }
@@ -1259,11 +1453,11 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
               ? const Center(child: CircularProgressIndicator())
               : error != null && current == null
               ? Center(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(error!),
-            ),
-          )
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(error!),
+                  ),
+                )
               : current == null
               ? const Center(child: Text('Không có dữ liệu task'))
               : _buildContent(current),
@@ -1276,14 +1470,13 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
     final status = '${current['status'] ?? 'UNKNOWN'}';
     final processed = widget.asInt(current['processed']);
     final total = widget.asInt(current['total']);
-    final progress =
-    total > 0 ? (processed / total).clamp(0.0, 1.0) : 0.0;
+    final progress = total > 0 ? (processed / total).clamp(0.0, 1.0) : 0.0;
 
     final results = current['results'] is List
         ? (current['results'] as List)
-        .whereType<Map>()
-        .map((item) => Map<String, dynamic>.from(item))
-        .toList()
+              .whereType<Map>()
+              .map((item) => Map<String, dynamic>.from(item))
+              .toList()
         : <Map<String, dynamic>>[];
 
     final errors = current['errors'] is List
@@ -1379,10 +1572,7 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                 const SizedBox(height: 8),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 8,
-                  ),
+                  child: LinearProgressIndicator(value: progress, minHeight: 8),
                 ),
                 const SizedBox(height: 10),
                 Text(
@@ -1423,20 +1613,20 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                 : () => _crawlAllResults(crawlableResults),
             icon: isCrawlingAll
                 ? const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                 : const Icon(Icons.download),
             label: Text(
               isCrawlingAll
                   ? 'Đang gửi yêu cầu crawl...'
-                  : 'Crawl tất cả nguồn có chapter mới (${crawlableResults.length})',
+                  : 'Crawl tất cả nguồn có chapter mới '
+                        '(${crawlableResults.length})',
             ),
           ),
         ),
         const SizedBox(height: 8),
-
         if (results.isEmpty)
           _emptyTaskMessage('Chưa có kết quả kiểm tra.')
         else
@@ -1477,7 +1667,7 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                   padding: const EdgeInsets.only(top: 5),
                   child: Text(
                     '${result['sourceName'] ?? 'Không rõ nguồn'}'
-                        ' • $chapterCount chapter mới',
+                    ' • $chapterCount chapter mới',
                     style: const TextStyle(fontSize: 12),
                   ),
                 ),
@@ -1496,24 +1686,18 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
-                      onPressed: chapters.isEmpty ||
-                          isCrawling ||
-                          isCrawlingAll
+                      onPressed: chapters.isEmpty || isCrawling || isCrawlingAll
                           ? null
                           : () => _crawlResult(result),
                       icon: isCrawling
                           ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                        ),
-                      )
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
                           : const Icon(Icons.download),
                       label: Text(
-                        isCrawling
-                            ? 'Đang gửi yêu cầu...'
-                            : 'Crawl nguồn này',
+                        isCrawling ? 'Đang gửi yêu cầu...' : 'Crawl nguồn này',
                       ),
                     ),
                   ),
@@ -1557,9 +1741,9 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                                     'Thứ tự: ${chapter['order'] ?? '?'}',
                                     style: TextStyle(
                                       fontSize: 11,
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
                                     ),
                                   ),
                                   if (chapter['url'] != null)
