@@ -42,7 +42,7 @@ class _WindowsMainScreenState extends State<WindowsMainScreen> {
       selectedIcon: Icons.home,
     ),
     _NavigationItem(
-      label: 'Bookmark',
+      label: 'Library',
       icon: Icons.book_outlined,
       selectedIcon: Icons.book,
     ),
@@ -164,10 +164,7 @@ class _WindowsMainScreenState extends State<WindowsMainScreen> {
                     ),
                   ),
                   Expanded(
-                    child: IndexedStack(
-                      index: _selectedIndex,
-                      children: _pages,
-                    ),
+                    child: _pages[_selectedIndex],
                   ),
                 ],
               ),

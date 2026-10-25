@@ -8,13 +8,9 @@ import 'package:novel_app/offline/service/offline_entry_service.dart';
 import 'package:novel_app/offline/service/offline_mode_service.dart';
 import 'package:novel_app/offline/service/story_download_service.dart';
 import 'package:novel_app/screens/chapter_reader_screen.dart';
-import 'package:novel_app/services/bookmark.dart';
 import 'package:novel_app/services/story_fetcher.dart';
 import 'package:novel_app/widget/expand_text.dart';
 import 'package:path_provider/path_provider.dart';
-import '../models/User.dart';
-import '../services/app_preference.dart';
-import 'login_screen.dart';
 class StoryDetailScreen extends StatefulWidget {
   final int storyId;
   const StoryDetailScreen({super.key, required this.storyId});
@@ -23,10 +19,7 @@ class StoryDetailScreen extends StatefulWidget {
 }
 class _StoryDetailScreenState extends State<StoryDetailScreen> {
   Map<String, dynamic> story = {};
-  User? user;
   bool storyLoading = true;
-  bool bookmarkLoading = false;
-  bool isSaved = false;
   bool downloadLoading = false;
   bool isDownloaded = false;
   bool downloadActionLoading = false;
@@ -78,11 +71,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     });
   }
   Future<void> init() async {
-    await _loadUser();
-    if (!mounted) return;
     await _loadStory();
-    if (!mounted) return;
-    await _loadSaved();
     if (!mounted) return;
     await _checkDownloaded();
   }
@@ -204,115 +193,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
           ),
         ),
       );
-    }
-  }
-  // ============================================================
-  // USER AND BOOKMARK
-  // ============================================================
-  Future<void> _loadUser() async {
-    final prefs = await AppPreferences.getInstance();
-    final userString = prefs.getString('user');
-    if (!mounted) return;
-    if (userString == null) {
-      setState(() => user = null);
-      return;
-    }
-    try {
-      final decoded = jsonDecode(userString);
-      setState(() {
-        user = User.fromJson(decoded);
-      });
-    } catch (_) {
-      setState(() => user = null);
-    }
-  }
-  Future<void> _loadSaved() async {
-    if (_isOffline || user == null) {
-      if (!mounted) return;
-      setState(() {
-        isSaved = false;
-        bookmarkLoading = false;
-      });
-      return;
-    }
-    setState(() => bookmarkLoading = true);
-    try {
-      final result = await Bookmark().isSavedApi(user!.id, widget.storyId);
-      if (!mounted) return;
-      setState(() {
-        isSaved = result;
-        bookmarkLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => bookmarkLoading = false);
-      debugPrint('Lỗi kiểm tra bookmark: $e');
-    }
-  }
-  void _showLoginRequiredDialog() {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Yêu cầu đăng nhập'),
-        content: const Text('Bạn cần đăng nhập để lưu truyện.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Đóng'),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(dialogContext);
-              final loginResult = await Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => LoginScreen()),
-              );
-              if (!mounted) return;
-              if (loginResult == true) {
-                await _loadUser();
-                if (!mounted) return;
-                await _loadSaved();
-              }
-            },
-            child: const Text('Đăng nhập'),
-          ),
-        ],
-      ),
-    );
-  }
-  Future<void> _toggleBookmark() async {
-    if (_isOffline) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Chức năng yêu thích cần kết nối mạng.')),
-      );
-      return;
-    }
-    if (user == null) {
-      _showLoginRequiredDialog();
-      return;
-    }
-    if (bookmarkLoading) return;
-    setState(() => bookmarkLoading = true);
-    try {
-      if (isSaved) {
-        await Bookmark().unsaveStory(user!.id, widget.storyId);
-      } else {
-        await Bookmark().saveStory(user!.id, widget.storyId);
-      }
-      if (!mounted) return;
-      setState(() {
-        isSaved = !isSaved;
-        bookmarkLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => bookmarkLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Không thể cập nhật danh sách yêu thích.'),
-        ),
-      );
-      debugPrint('Lỗi cập nhật bookmark: $e');
     }
   }
   // ============================================================
@@ -1175,24 +1055,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
         title: Text(story['title']?.toString() ?? ''),
         actions: [
           _buildDownloadButton(),
-          IconButton(
-            tooltip: _isOffline
-                ? 'Yêu thích cần kết nối mạng'
-                : isSaved
-                ? 'Bỏ yêu thích'
-                : 'Thêm vào yêu thích',
-            icon: bookmarkLoading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Icon(
-                    isSaved ? Icons.favorite : Icons.favorite_border,
-                    color: isSaved ? Colors.red : null,
-                  ),
-            onPressed: bookmarkLoading ? null : _toggleBookmark,
-          ),
         ],
       ),
       body: Column(

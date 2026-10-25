@@ -1,6 +1,9 @@
 # Changelog
-### Trình đọc chương (Chapter Reader)
-- Ảnh chương được tải từ bộ nhớ Offline khi gói package của truyện đã có sẵn trên thiết bị.
-- Nội dung văn bản chương và danh sách chương trong màn hình chi tiết vẫn được lấy từ server khi ở chế độ Online.
-### Cập nhật OTA (Over-The-Air)
-- Hiển thị lịch sử thay đổi trong hộp thoại cập nhật trước khi tải xuống.
+### Danh sách đọc (Library)
+- Thay thế hoàn toàn chức năng Bookmark bằng Reading List (lịch sử đọc).
+- Màn hình Library hiển thị danh sách truyện đã đọc kèm số chapter cao nhất đã đọc.
+- Khi ở chế độ offline, hiển thị thông báo: "Lịch sử đọc sẽ không được lưu khi ở chế độ offline."
+- Nút điều hướng thứ hai đổi tên từ "Bookmarks" / "Bookmark" thành "Library".
+- Bỏ nút yêu thích ở màn hình chi tiết truyện.
+### Sửa lỗi Windows
+- Giờ đây mỗi tab (Library, Profile…) load lại khi được chọn lại.

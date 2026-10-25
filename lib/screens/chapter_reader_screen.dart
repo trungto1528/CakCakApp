@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:novel_app/screens/story_detail_screen.dart';
 import 'package:novel_app/services/last_read.dart';
+import 'package:novel_app/services/reading_list.dart';
 import '../config/api_config.dart';
 import '../models/User.dart';
 import '../offline/service/offline_entry_service.dart';
@@ -387,6 +388,11 @@ class _ChapterReaderScreenState extends State<ChapterReaderScreen> {
           widget.storyId,
           chapterId,
           currentSource,
+        );
+        await ReadingList().save(
+          user.id,
+          widget.storyId,
+          chapterId,
         );
       } else {
         await _saveLastRead(chapterId);
