@@ -4,10 +4,12 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:novel_app/config/api_config.dart';
+import 'package:novel_app/models/User.dart';
 import 'package:novel_app/offline/service/offline_entry_service.dart';
 import 'package:novel_app/offline/service/offline_mode_service.dart';
 import 'package:novel_app/offline/service/story_download_service.dart';
 import 'package:novel_app/screens/chapter_reader_screen.dart';
+import 'package:novel_app/services/app_preference.dart';
 import 'package:novel_app/services/story_fetcher.dart';
 import 'package:novel_app/widget/expand_text.dart';
 import 'package:path_provider/path_provider.dart';
@@ -28,6 +30,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
   File? _offlineCover;
   late final ValueNotifier<StoryDownloadProgress> _downloadNotifier;
   List<dynamic> chapters = [];
+  String? _selectedChapterSource;
   static const int _pageSize = 20;
   int _currentPage = 0;
   bool get _isOffline => OfflineModeService.isOffline.value;
@@ -169,7 +172,18 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
         await _loadOfflineStory();
         return;
       }
-      final data = await StoryFetcher().fetchStory(widget.storyId);
+      int? userId;
+      try {
+        final prefs = await AppPreferences.getInstance();
+        final storedUser = prefs.getString('user');
+        if (storedUser != null) {
+          final currentUser = User.fromJson(jsonDecode(storedUser));
+          userId = currentUser.id;
+        }
+      } catch (_) {
+        // Không có user đã đăng nhập, vẫn tải truyện mà không truyền userId.
+      }
+      final data = await StoryFetcher().fetchStory(widget.storyId, userId: userId);
       if (!mounted) return;
       setState(() {
         story = Map<String, dynamic>.from(data);
@@ -263,15 +277,17 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
           context,
         ).showSnackBar(const SnackBar(content: Text('Tải truyện hoàn tất.')));
       } else if (latest.error != null) {
+        debugPrint('Lỗi tải truyện: ${latest.error}');
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Lỗi tải truyện: ${latest.error}')),
+          const SnackBar(content: Text('Tải truyện thất bại.')),
         );
       }
     } catch (e) {
       if (!mounted) return;
+      debugPrint('Lỗi tải truyện: $e');
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Lỗi tải truyện: $e')));
+      ).showSnackBar(const SnackBar(content: Text('Tải truyện thất bại.')));
     } finally {
       if (mounted) {
         _syncDownloadProgress();
@@ -401,6 +417,13 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
   // ============================================================
   // CHAPTERS
   // ============================================================
+  String _formatChapterNumber(double number) {
+    if (number == number.truncateToDouble()) {
+      return number.toInt().toString();
+    }
+    return number.toString();
+  }
+
   double? _parseChapterNumber(dynamic value) {
     if (value == null) return null;
     if (value is num) {
@@ -413,26 +436,13 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     if (number == null || !number.isFinite) return null;
     return number;
   }
-  String _formatChapterNumber(double number) {
-    if (number == number.truncateToDouble()) {
-      return number.toInt().toString();
-    }
-    return number.toString();
-  }
+
   Map<double, List<dynamic>> get groupedChapters {
     final Map<double, List<dynamic>> result = {};
     for (final chapter in chapters) {
       if (chapter is! Map) continue;
       final number = _parseChapterNumber(chapter['chapterNumber']);
-      if (number == null) {
-        debugPrint(
-          'Bỏ qua chapter không có chapterNumber hợp lệ: '
-          '${chapter['title']} - ${chapter['chapterNumber']}',
-        );
-        continue;
-      }
-      // Nhóm theo phần nguyên của số chapter (1, 1.1, 1.2 cùng nhóm là 1)
-      // và (0, 000.1, 000.2 cùng nhóm là 0)
+      if (number == null) continue;
       final groupKey = number.truncateToDouble();
       result.putIfAbsent(groupKey, () => []);
       result[groupKey]!.add(chapter);
@@ -440,13 +450,55 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     final keys = result.keys.toList()..sort();
     return {for (final number in keys) number: result[number]!};
   }
-  int get _totalPages => (groupedChapters.length / _pageSize).ceil();
+
+  /// Danh sách tên nguồn (dùng cho dropdown lọc).
+  List<String> get chapterSources {
+    final sources = <String>{};
+    for (final chapter in chapters) {
+      if (chapter is! Map) continue;
+      sources.add(chapter['createdBy']?.toString() ?? 'Không rõ');
+    }
+    return sources.toList()..sort();
+  }
+
+  /// Chương đã lọc theo nguồn đã chọn (null = tất cả nguồn).
+  List<dynamic> get filteredChapters {
+    if (_selectedChapterSource == null) return chapters;
+    return chapters.where((chapter) {
+      if (chapter is! Map) return false;
+      return chapter['createdBy']?.toString() == _selectedChapterSource;
+    }).toList();
+  }
+
+  /// Các nhóm chương theo số chapter sau khi lọc theo nguồn.
+  Map<double, List<dynamic>> get filteredGroupedChapters {
+    final Map<double, List<dynamic>> result = {};
+    for (final chapter in filteredChapters) {
+      if (chapter is! Map) continue;
+      final number = _parseChapterNumber(chapter['chapterNumber']);
+      if (number == null) continue;
+      final groupKey = number.truncateToDouble();
+      result.putIfAbsent(groupKey, () => []);
+      result[groupKey]!.add(chapter);
+    }
+    final keys = result.keys.toList()..sort();
+    return {for (final number in keys) number: result[number]!};
+  }
+
+  int get _totalPages => (filteredGroupedChapters.length / _pageSize).ceil();
   Map<double, List<dynamic>> get paginatedChapters {
-    final entries = groupedChapters.entries.toList();
+    final entries = filteredGroupedChapters.entries.toList();
     final start = _currentPage * _pageSize;
     if (start >= entries.length) return {};
     final end = (start + _pageSize).clamp(0, entries.length);
     return Map<double, List<dynamic>>.fromEntries(entries.sublist(start, end));
+  }
+
+  void _onChapterSourceChanged(String? source) {
+    setState(() {
+      _selectedChapterSource = source;
+      _currentPage = 0;
+    });
   }
   void _goToPage(int page) {
     if (page < 0 || page >= _totalPages) return;
@@ -705,7 +757,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     );
   }
   Widget _buildChaptersContent() {
-    final grouped = groupedChapters;
     final paginated = paginatedChapters;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -720,12 +771,37 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Text(
-            '${grouped.length} chương · '
+            '${filteredGroupedChapters.length} nhóm chương · '
             '${_totalPages == 0 ? 0 : _currentPage + 1}/$_totalPages trang',
             style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
           ),
         ),
-        if (grouped.isEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: DropdownButtonFormField<String?>(
+            decoration: const InputDecoration(
+              labelText: 'Lọc theo nguồn',
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+            value: _selectedChapterSource,
+            items: [
+              const DropdownMenuItem<String?>(
+                value: null,
+                child: Text('Tất cả nguồn'),
+              ),
+              ...chapterSources.map(
+                (source) => DropdownMenuItem<String?>(
+                  value: source,
+                  child: Text(source),
+                ),
+              ),
+            ],
+            onChanged: _onChapterSourceChanged,
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (filteredGroupedChapters.isEmpty)
           const Padding(
             padding: EdgeInsets.all(24),
             child: Center(child: Text('Chưa có chương nào')),
@@ -752,6 +828,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                   return const SizedBox.shrink();
                 }
                 final source = chapter['createdBy']?.toString() ?? '';
+                final isRead = chapter['isRead'] == true;
                 return Container(
                   margin: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -774,13 +851,17 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                       horizontal: 16,
                       vertical: 4,
                     ),
-                    leading: const Icon(
-                      Icons.menu_book_rounded,
-                      color: Colors.blue,
+                    leading: Icon(
+                      isRead ? Icons.check_circle : Icons.menu_book_rounded,
+                      color: isRead ? Colors.green : Colors.blue,
                     ),
                     title: Text(
                       chapter['title']?.toString() ?? 'Không có tiêu đề',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: isRead ? Colors.grey.shade600 : null,
+                        decoration: isRead ? TextDecoration.lineThrough : null,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -791,9 +872,10 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                         color: Colors.grey.shade600,
                       ),
                     ),
-                    trailing: const Icon(
-                      Icons.arrow_forward_ios_rounded,
+                    trailing: Icon(
+                      isRead ? Icons.done : Icons.arrow_forward_ios_rounded,
                       size: 16,
+                      color: isRead ? Colors.green : null,
                     ),
                     onTap: () => _openChapter(chapter),
                   ),

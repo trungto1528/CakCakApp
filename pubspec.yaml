@@ -41,6 +41,7 @@ dependencies:
   image: ^4.10.2
   uuid: ^4.6.0
   dio: ^5.4.0
+  flutter_markdown_plus: ^1.0.12
   archive: ^4.0.7
   file_picker: ^12.0.0
   path_provider: ^2.1.2

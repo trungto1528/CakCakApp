@@ -23,7 +23,10 @@ class StoryFetcher {
   }
 
   /// Lấy thông tin chi tiết truyện.
-  Future<Map<String, dynamic>> fetchStory(int storyId) async {
+  ///
+  /// [userId] nếu truyền sẽ được gửi headers để backend đánh dấu chương
+  /// mà người dùng đã đọc (trường isRead trên mỗi chapter).
+  Future<Map<String, dynamic>> fetchStory(int storyId, {int? userId}) async {
     if (OfflineModeService.isOffline.value) {
       final story = await _readOfflineStory(storyId);
       if (story != null) return story;
@@ -32,6 +35,7 @@ class StoryFetcher {
     try {
       final response = await http.get(
         Uri.parse('${ApiConfig.api}/stories/fetch/$storyId'),
+        headers: userId != null ? {'userId': userId.toString()} : null,
       );
       if (response.statusCode != 200) {
         throw Exception('Failed to fetch story: HTTP ${response.statusCode}');
