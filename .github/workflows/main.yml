@@ -143,12 +143,16 @@ jobs:
         run: |
           CHANGELOG_FILE="changelog/note.md"
           if [ -f "$CHANGELOG_FILE" ]; then
-            echo "content<<EOF" >> "$GITHUB_OUTPUT"
-            cat "$CHANGELOG_FILE" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
+            EOF_MARKER="EOF_$(date +%s)_$RANDOM"
+            {
+              echo "content<<$EOF_MARKER"
+              cat "$CHANGELOG_FILE"
+              echo ""
+              echo "$EOF_MARKER"
+            } >> "$GITHUB_OUTPUT"
             echo "Found changelog: $CHANGELOG_FILE"
           else
-            echo "" >> "$GITHUB_OUTPUT"
+            echo "content=" >> "$GITHUB_OUTPUT"
             echo "No changelog file: $CHANGELOG_FILE"
           fi
       - name: Create git tag
