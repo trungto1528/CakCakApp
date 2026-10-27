@@ -294,9 +294,8 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Hủy tải truyện?'),
         content: const Text(
-          'Tác vụ tải sẽ dừng. Những ảnh đã tải thành công được giữ lại '
-          'để có thể tiếp tục tải sau này. Bản tải chưa hoàn tất sẽ '
-          'không được dùng để đọc offline.',
+          'Tác vụ tải sẽ dừng và dữ liệu đã tải sẽ bị xóa. '
+          'Tiến độ tải chưa hoàn tất sẽ không được dùng để đọc offline.',
         ),
         actions: [
           TextButton(
@@ -321,7 +320,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Đã hủy tải. Dữ liệu đã tải thành công được giữ lại.'),
+          content: Text('Đã hủy tải. Dữ liệu đã tải đã bị xóa.'),
         ),
       );
     } catch (e) {
