@@ -216,25 +216,33 @@ class StoryFetcher {
     }
     return null;
   }
+
   /// Lấy trang truyện với pagination.
   /// Lấy một trang truyện và metadata phân trang từ backend.
   Future<Map<String, dynamic>> fetchStoriesPage(int page, int limit) async {
     final uri = Uri.parse('${ApiConfig.api}/stories/page').replace(
       queryParameters: {'page': page.toString(), 'limit': limit.toString()},
     );
+
     final res = await http.get(uri);
+
     if (res.statusCode != 200) {
       throw Exception('Không thể tải trang truyện: HTTP ${res.statusCode}');
     }
+
     final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+
     if (decoded is! Map) {
       throw Exception('Dữ liệu phân trang không hợp lệ.');
     }
+
     final data = Map<String, dynamic>.from(decoded);
-    final rawStories = data['stories'];
+    final rawStories = data['content'];
+
     if (rawStories is! List) {
-      throw Exception('Backend không trả về danh sách stories hợp lệ.');
+      throw Exception('Backend không trả về danh sách content hợp lệ.');
     }
+
     return {
       'stories': rawStories
           .whereType<Map>()
