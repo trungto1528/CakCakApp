@@ -1,3 +1,6 @@
 # Changelog
 ### StoryDetailScreen
-- Sửa lỗi noti không chính xác khi huỷ tải truyện.
+- Thêm filter source.
+- Thêm hiển thị đánh dấu truyện đã đọc.
+### OTA
+- Hỗ trợ markdown.
