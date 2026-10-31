@@ -9,6 +9,7 @@ import 'package:novel_app/offline/service/offline_entry_service.dart';
 import 'package:novel_app/offline/service/offline_mode_service.dart';
 import 'package:novel_app/offline/service/story_download_service.dart';
 import 'package:novel_app/screens/chapter_reader_screen.dart';
+import 'package:novel_app/screens/chapter_reader_windows.dart';
 import 'package:novel_app/services/app_preference.dart';
 import 'package:novel_app/services/story_fetcher.dart';
 import 'package:novel_app/widget/expand_text.dart';
@@ -513,14 +514,22 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       return;
     }
     final source = chapter['createdBy']?.toString() ?? '';
+    final isWindows =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => ChapterReaderScreen(
-          chapterId: chapterId,
-          storyId: widget.storyId,
-          source: source,
-        ),
+        builder: (_) => isWindows
+            ? ChapterReaderWindowsScreen(
+                chapterId: chapterId,
+                storyId: widget.storyId,
+                source: source,
+              )
+            : ChapterReaderScreen(
+                chapterId: chapterId,
+                storyId: widget.storyId,
+                source: source,
+              ),
       ),
     );
   }

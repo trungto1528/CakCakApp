@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:novel_app/screens/chapter_reader_screen.dart';
+import 'package:novel_app/screens/chapter_reader_windows.dart';
 import 'package:novel_app/screens/search_screen.dart';
 import 'package:novel_app/screens/story_detail_screen.dart';
 import 'package:novel_app/services/chapter_fetcher.dart';
@@ -606,11 +607,21 @@ class _HomePageState extends State<HomePage> with RouteAware {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => ChapterReaderScreen(
-                      storyId: lastStoryId!,
-                      chapterId: lastChapterId!,
-                      source: lastReadCreatedBy!,
-                    ),
+                    builder: (_) {
+                      final isWindows =
+                          !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+                      return isWindows
+                          ? ChapterReaderWindowsScreen(
+                              storyId: lastStoryId!,
+                              chapterId: lastChapterId!,
+                              source: lastReadCreatedBy!,
+                            )
+                          : ChapterReaderScreen(
+                              storyId: lastStoryId!,
+                              chapterId: lastChapterId!,
+                              source: lastReadCreatedBy!,
+                            );
+                    },
                   ),
                 );
               },
