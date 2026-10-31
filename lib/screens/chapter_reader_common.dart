@@ -1001,11 +1001,22 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
     // Khi đang phóng to trên Android, ưu tiên thao tác pan/zoom.
     if (isMobile && _mobileZoomed) return;
 
-    if (details.localPosition.dx < width / 2) {
+    final tapX = details.localPosition.dx;
+    final zoneWidth = width / 3;
+
+    // 1/3 bên trái: Trang trước.
+    if (tapX < zoneWidth) {
       goPrevPage();
-    } else {
-      goNextPage();
+      return;
     }
+
+    // 1/3 bên phải: Trang tiếp theo.
+    if (tapX > width - zoneWidth) {
+      goNextPage();
+      return;
+    }
+
+    // 1/3 chính giữa: Không thực hiện thao tác.
   }
 
   void _jumpToImage(int imageIndex, {bool animate = false}) {
@@ -1674,9 +1685,7 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       child: PageView.builder(
         controller: _pageController,
         scrollDirection: Axis.horizontal,
-        physics: isWindows
-            ? const NeverScrollableScrollPhysics()
-            : const PageScrollPhysics(),
+        physics: const NeverScrollableScrollPhysics(),
         itemCount: totalPages,
         onPageChanged: onPageChanged,
         itemBuilder: (context, pageIndex) {
