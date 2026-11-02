@@ -70,13 +70,13 @@ class _LibraryPageState extends State<LibraryPage> {
   Widget build(BuildContext context) {
     if (loading) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Library')),
+        appBar: AppBar(title: const Text('Reading')),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
     if (userId == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Library')),
+        appBar: AppBar(title: const Text('Reading')),
         body: Center(
           child: Text(
             "Bạn cần đăng nhập để xem lịch sử đọc",
@@ -88,7 +88,7 @@ class _LibraryPageState extends State<LibraryPage> {
     }
     if (readingList.isEmpty) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Library')),
+        appBar: AppBar(title: const Text('Reading')),
         body: Center(
           child: Text(
             "Bạn chưa đọc truyện nào",
@@ -105,7 +105,7 @@ class _LibraryPageState extends State<LibraryPage> {
           },
         );
     return Scaffold(
-      appBar: AppBar(title: const Text('Library')),
+      appBar: AppBar(title: const Text('Reading')),
       body: Column(
         children: [
           if (_isOffline)

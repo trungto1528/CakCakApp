@@ -50,7 +50,7 @@ class _MainScreenState extends State<MainScreen> {
           NavigationDestination(
             icon: Icon(Icons.book_outlined),
             selectedIcon: Icon(Icons.book),
-            label: 'Library',
+            label: 'Reading',
           ),
           NavigationDestination(
             icon: Icon(Icons.person_outline),
