@@ -28,6 +28,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
   double? lastChapterNumber;
   late Future<List<dynamic>> latestStoriesFuture;
   Timer? _debounce;
+
   String keyword = '';
   int? userId;
   int? lastStoryId;
@@ -61,6 +62,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
   @override
   void dispose() {
     _debounce?.cancel();
+    super.dispose();
     _offlineSearchController.dispose();
     OfflineModeService.isOffline.removeListener(
       _onOfflineModeChanged,
@@ -583,6 +585,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
       ),
     );
   }
+
   // ==================== ONLINE HOME ====================
   Widget buildHome() {
     return ListView(

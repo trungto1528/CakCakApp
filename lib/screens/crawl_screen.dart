@@ -38,10 +38,15 @@ class _CrawlScreenState extends State<CrawlScreen> {
 
   Map<String, dynamic>? malInfo;
   List<Map<String, dynamic>> malCandidates = [];
+  bool showMalCandidates = false;
 
   bool malLoading = false;
   String? malStatus;
   String? _crawlUrlPending;
+
+  // TruyenGGVN: ten goc va trang thai dung alternative name de hien thi tren UI.
+  String? _crawlOriginalTitle;
+  bool _crawlUsedAlternative = false;
 
   @override
   void initState() {
@@ -380,8 +385,9 @@ class _CrawlScreenState extends State<CrawlScreen> {
       _createNewStory = true;
       chapterRangeController.clear();
       malInfo = null;
-      malCandidates = [];
       malStatus = null;
+      malCandidates = [];
+      showMalCandidates = false;
       _crawlUrlPending = null;
       _crawlUrlPending = null;
     });
@@ -418,9 +424,14 @@ class _CrawlScreenState extends State<CrawlScreen> {
     final url = _getResultUrl(result);
 
     if (url.isEmpty) {
+      print('[CrawlScreen][selectSearchResult] Khong co URL truyen');
       _showSnackBar('Khong co URL truyen');
       return;
     }
+
+    print(
+      '[CrawlScreen][selectSearchResult] url=$url title=${result['title']}',
+    );
 
     if (loading) return;
 
@@ -433,47 +444,166 @@ class _CrawlScreenState extends State<CrawlScreen> {
       _createNewStory = true;
       chapterRangeController.clear();
       malInfo = null;
-      malCandidates = [];
       malStatus = null;
+      _crawlOriginalTitle = null;
+      _crawlUsedAlternative = false;
     });
 
     _crawlUrlPending = url;
 
+      Map<String, dynamic>? preCrawledData;
+      String? alternativeName;
+      bool alternativeUsed = false;
+      String? originalTitle;
+
     try {
       final title = result['title']?.toString().trim() ?? '';
+      final isTruyenGGVN = selectedWebsite == 'TruyenGGVN';
 
+      // TruyenGGVN: crawl truoc de lay alternative name (ten khac) neu can.
+      if (isTruyenGGVN) {
+        print(
+          '[CrawlScreen][selectSearchResult] TruyenGGVN: crawl lay thong tin truoc url=$url',
+        );
+        preCrawledData = await crawlService.crawlStory(url);
+        if (!mounted) return;
+        alternativeName = _extractAlternativeName(preCrawledData);
+        print(
+          '[CrawlScreen][selectSearchResult] TruyenGGVN alternativeName=$alternativeName',
+        );
+      }
+
+      print('[CrawlScreen][selectSearchResult] goi searchMal title="$title"');
       final malResult = await crawlService.searchMal(title);
       if (!mounted) return;
 
       final status = malResult['status']?.toString() ?? '';
+      print(
+        '[CrawlScreen][selectSearchResult] MAL status=$status malId=${malResult['malId']} resultsCount=${(malResult['results'] as List?)?.length ?? 0}',
+      );
       setState(() {
         malStatus = status;
       });
 
-      if (status == 'DIRECT_MATCH') {
-        final malId = (malResult['malId'] as num?)?.toInt();
-        if (malId != null) {
-          await _loadMalDetail(malId);
-        } else {
-          await _fetchChapters(url, malInfo: null);
-        }
-      } else if (status == 'MULTIPLE_RESULTS') {
-        final results = malResult['results'] as List?;
-        if (results != null) {
+      // Neu title khong search ra va co alternative name, thu search lai bang alternative name.
+      Map<String, dynamic>? effectiveMalResult = malResult;
+      String effectiveStatus = status;
+
+      if (isTruyenGGVN &&
+          (status == 'NOT_FOUND' || status.isEmpty) &&
+          alternativeName != null &&
+          alternativeName.isNotEmpty) {
+        print(
+          '[CrawlScreen][selectSearchResult] Title khong tim thay, thu alternative name="$alternativeName"',
+        );
+        final altResult = await crawlService.searchMal(alternativeName);
+        if (!mounted) return;
+        final altStatus = altResult['status']?.toString() ?? '';
+        print(
+          '[CrawlScreen][selectSearchResult] Alternative MAL status=$altStatus malId=${altResult['malId']}',
+        );
+        if (altStatus == 'DIRECT_MATCH' || altStatus == 'MULTIPLE_RESULTS') {
+          alternativeUsed = true;
+          effectiveMalResult = altResult;
+          effectiveStatus = altStatus;
+          originalTitle = title;
+          if (!mounted) return;
           setState(() {
-            malCandidates = results
-                .map<Map<String, dynamic>>(
-                    (item) => Map<String, dynamic>.from(item as Map))
-                .toList();
+            _crawlOriginalTitle = title;
+            _crawlUsedAlternative = true;
           });
+        } else {
+          print(
+            '[CrawlScreen][selectSearchResult] Alternative cung khong tim thay -> malInfo=null',
+          );
+        }
+      }
+
+      if (effectiveStatus == 'DIRECT_MATCH') {
+        final malId = (effectiveMalResult!['malId'] as num?)?.toInt();
+        print('[CrawlScreen][selectSearchResult] DIRECT_MATCH malId=$malId');
+        if (malId != null) {
+          await _loadMalDetail(malId,
+              preCrawledData: preCrawledData,
+              malAlternativeUsed: alternativeUsed,
+              originalTitle: originalTitle);
+        } else {
+          print(
+            '[CrawlScreen][selectSearchResult] DIRECT_MATCH khong co malId -> _fetchChapters malInfo=null',
+          );
+          await _fetchChapters(url,
+              malInfo: null,
+              preCrawledData: preCrawledData,
+              malAlternativeUsed: alternativeUsed,
+              originalTitle: originalTitle);
+        }
+      } else if (effectiveStatus == 'MULTIPLE_RESULTS') {
+        final results = effectiveMalResult!['results'] as List?;
+        final resultsCount = results?.length ?? 0;
+        print(
+          '[CrawlScreen][selectSearchResult] MULTIPLE_RESULTS resultsCount=$resultsCount',
+        );
+        if (results != null && results.isNotEmpty) {
+          final candidates = results
+              .map<Map<String, dynamic>>(
+                  (item) => Map<String, dynamic>.from(item as Map))
+              .toList();
+
+          final first = candidates.first;
+          final firstMalId = _readStoryId(first['malId']);
+          print(
+            '[CrawlScreen][selectSearchResult] MULTIPLE_RESULTS -> chon candidate dau tien malId=$firstMalId title=${first['title']}',
+          );
+
+          setState(() {
+            malCandidates = candidates;
+            showMalCandidates = false;
+          });
+
+          if (firstMalId != null) {
+            await _loadMalDetail(firstMalId,
+                preCrawledData: preCrawledData,
+                malAlternativeUsed: alternativeUsed,
+                originalTitle: originalTitle);
+          } else {
+            print(
+              '[CrawlScreen][selectSearchResult] MULTIPLE_RESULTS candidate dau tien khong co malId -> _fetchChapters malInfo=null',
+            );
+            await _fetchChapters(url,
+                malInfo: null,
+                preCrawledData: preCrawledData,
+                malAlternativeUsed: alternativeUsed,
+                originalTitle: originalTitle);
+          }
+        } else {
+          print(
+            '[CrawlScreen][selectSearchResult] MULTIPLE_RESULTS khong co candidate -> _fetchChapters malInfo=null',
+          );
+          await _fetchChapters(url,
+              malInfo: null,
+              preCrawledData: preCrawledData,
+              malAlternativeUsed: alternativeUsed,
+              originalTitle: originalTitle);
         }
       } else {
-        await _fetchChapters(url, malInfo: null);
+        print(
+          '[CrawlScreen][selectSearchResult] status khac ($effectiveStatus) -> _fetchChapters malInfo=null',
+        );
+        await _fetchChapters(url,
+            malInfo: null,
+            preCrawledData: preCrawledData,
+            malAlternativeUsed: alternativeUsed,
+            originalTitle: originalTitle);
       }
     } catch (e) {
       if (!mounted) return;
+      print('[CrawlScreen][selectSearchResult] Loi tim MAL: $e');
       _showSnackBar('Loi tim MAL: $e');
-      await _fetchChapters(url, malInfo: null);
+      await _fetchChapters(url,
+          malInfo: null,
+          preCrawledData: preCrawledData,
+          malAlternativeUsed: alternativeUsed,
+          originalTitle: originalTitle);
     } finally {
       if (mounted) {
         setState(() {
@@ -483,16 +613,38 @@ class _CrawlScreenState extends State<CrawlScreen> {
     }
   }
 
-  Future<void> _fetchChapters(String url, {Map<String, dynamic>? malInfo}) async {
+  Future<void> _fetchChapters(String url, {
+    Map<String, dynamic>? malInfo,
+    Map<String, dynamic>? preCrawledData,
+    bool malAlternativeUsed = false,
+    String? originalTitle,
+  }) async {
+    print(
+      '[CrawlScreen][_fetchChapters] bat dau url=$url malInfo null=${malInfo == null} malId=${malInfo?['malId']} preCrawled=${preCrawledData != null}',
+    );
     try {
-      final resultData = await crawlService.crawlStory(url);
-      if (!mounted) return;
-
-      final normalizedData = Map<String, dynamic>.from(resultData);
-      final rawChapters = normalizedData['chapters'] as List? ?? [];
+      Map<String, dynamic> normalizedData;
+      if (preCrawledData != null) {
+        normalizedData = Map<String, dynamic>.from(preCrawledData);
+        print(
+          '[CrawlScreen][_fetchChapters] su du lieu da crawl truoc chaptersCount=${(normalizedData['chapters'] as List?)?.length ?? 0}',
+        );
+      } else {
+        final resultData = await crawlService.crawlStory(url);
+        if (!mounted) return;
+        normalizedData = Map<String, dynamic>.from(resultData);
+        print(
+          '[CrawlScreen][_fetchChapters] crawlStory xong chaptersCount=${(normalizedData['chapters'] as List?)?.length ?? 0} url=${normalizedData['url']} cover=${normalizedData['cover']} coverUrl=${normalizedData['coverUrl']}',
+        );
+      }
       normalizedData['url'] ??= url;
+      final rawCover = normalizedData['cover']?.toString().trim();
+      if (rawCover == null || rawCover.isEmpty) {
+        normalizedData['cover'] =
+            normalizedData['coverUrl']?.toString().trim() ?? '';
+      }
 
-      normalizedData['chapters'] = rawChapters.map((rawChapter) {
+      normalizedData['chapters'] = (normalizedData['chapters'] as List? ?? []).map((rawChapter) {
         final chapter = Map<String, dynamic>.from(rawChapter as Map);
         final isCrawled = _isCrawled(chapter);
         chapter['crawled'] = isCrawled;
@@ -503,6 +655,12 @@ class _CrawlScreenState extends State<CrawlScreen> {
       final initialStoryId = _readStoryId(normalizedData['selectedStoryId']);
 
       _mergeMalMetadata(normalizedData, malInfo);
+
+      // TruyenGGVN: neu alternative name duoc dung de search MAL (title khong search ra),
+      // doi vai tro: ten MAL (ten Anh) thanh title, ten goc truyenggvn luu thanh Alternative Name.
+      if (malAlternativeUsed && originalTitle != null && originalTitle.isNotEmpty) {
+        _storeOriginalTitleAsAlternative(normalizedData, originalTitle);
+      }
 
       if (!mounted) return;
       setState(() {
@@ -532,13 +690,54 @@ class _CrawlScreenState extends State<CrawlScreen> {
     data['author'] = _malString(malInfo['authors']);
   }
 
-  Future<void> _selectMalCandidate(Map<String, dynamic> candidate) async {
-    final malId = _readStoryId(candidate['malId']);
-    if (malId == null) return;
-    await _loadMalDetail(malId);
+  /// Trich xuat alternative name tu thong tin website da crawl.
+  String? _extractAlternativeName(Map<String, dynamic> data) {
+    final information = data['information'];
+    if (information is List) {
+      for (final item in information) {
+        if (item is Map) {
+          final label = item['label']?.toString().trim();
+          if (label == 'Alternative Name') {
+            final value = item['value'];
+            if (value != null && value.toString().trim().isNotEmpty) {
+              return value.toString().trim();
+            }
+          }
+        }
+      }
+    }
+    return null;
   }
 
-  Future<void> _loadMalDetail(int malId) async {
+  /// Luu ten goc cua truyenggvn thanh Alternative Name khi alternative name
+  /// da duoc dung de lay thong tin MAL (doi vai tro).
+  void _storeOriginalTitleAsAlternative(
+      Map<String, dynamic> data, String originalTitle) {
+    final information = data['information'];
+    if (information is List) {
+      final exists = information.any((item) {
+        return item is Map &&
+            item['label']?.toString().trim() == 'Alternative Name' &&
+            item['value']?.toString().trim() == originalTitle;
+      });
+      if (!exists) {
+        information.add({'label': 'Alternative Name', 'value': originalTitle});
+      }
+    } else {
+      data['information'] = [
+        {'label': 'Alternative Name', 'value': originalTitle}
+      ];
+    }
+  }
+
+  Future<void> _loadMalDetail(int malId, {
+    Map<String, dynamic>? preCrawledData,
+    bool malAlternativeUsed = false,
+    String? originalTitle,
+  }) async {
+    print(
+      '[CrawlScreen][_loadMalDetail] bat dau malId=$malId pendingUrl=$_crawlUrlPending',
+    );
     setState(() {
       malLoading = true;
       malInfo = null;
@@ -547,22 +746,37 @@ class _CrawlScreenState extends State<CrawlScreen> {
       final detail = await crawlService.getMalDetail(malId);
       if (!mounted) return;
 
+      print(
+        '[CrawlScreen][_loadMalDetail] detail nhan duoc malId=${detail['malId']} title=${detail['title']} keys=${detail.keys.toList()}',
+      );
       setState(() {
         malInfo = Map<String, dynamic>.from(detail);
       });
 
       final pendingUrl = _crawlUrlPending;
+      print(
+        '[CrawlScreen][_loadMalDetail] pendingUrl=$pendingUrl malInfo null=${malInfo == null}',
+      );
       if (pendingUrl != null && mounted) {
         _crawlUrlPending = null;
-        await _fetchChapters(pendingUrl, malInfo: malInfo);
+        await _fetchChapters(pendingUrl,
+            malInfo: malInfo,
+            preCrawledData: preCrawledData,
+            malAlternativeUsed: malAlternativeUsed,
+            originalTitle: originalTitle);
       }
     } catch (e) {
       if (!mounted) return;
+      print('[CrawlScreen][_loadMalDetail] Loi lay chi tiet MAL: $e');
       _showSnackBar('Loi lay chi tiet MAL: $e');
       final pendingUrl = _crawlUrlPending;
       if (pendingUrl != null && mounted) {
         _crawlUrlPending = null;
-        await _fetchChapters(pendingUrl, malInfo: null);
+        await _fetchChapters(pendingUrl,
+            malInfo: null,
+            preCrawledData: preCrawledData,
+            malAlternativeUsed: malAlternativeUsed,
+            originalTitle: originalTitle);
       }
     } finally {
       if (mounted) {
@@ -581,11 +795,13 @@ class _CrawlScreenState extends State<CrawlScreen> {
       chapterRangeController.clear();
 
       malInfo = null;
-      malCandidates = [];
       malStatus = null;
-      _crawlUrlPending = null;
+      malCandidates = [];
+      showMalCandidates = false;
       _crawlUrlPending = null;
       malLoading = false;
+      _crawlOriginalTitle = null;
+      _crawlUsedAlternative = false;
     });
   }
 
@@ -1042,6 +1258,10 @@ class _CrawlScreenState extends State<CrawlScreen> {
   Widget build(BuildContext context) {
     final chapterList = chapters;
 
+    print(
+      '[CrawlScreen][build] data null=${data == null} malCandidates=${malCandidates.length} showMalCandidates=$showMalCandidates malInfo null=${malInfo == null} loading=$loading searching=$searching',
+    );
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Cào truyện'),
@@ -1109,8 +1329,9 @@ class _CrawlScreenState extends State<CrawlScreen> {
                         chapterRangeController.clear();
 
                         malInfo = null;
-                        malCandidates = [];
                         malStatus = null;
+                        malCandidates = [];
+                        showMalCandidates = false;
       _crawlUrlPending = null;
                         _crawlUrlPending = null;
                       });
@@ -1149,10 +1370,9 @@ class _CrawlScreenState extends State<CrawlScreen> {
               child: ListView(
                 padding: const EdgeInsets.only(bottom: 90),
                 children: [
-                  _buildMalCandidates(),
+                  if (showMalCandidates) _buildMalCandidates(),
                   _buildStoryHeader(),
                   _buildMalInfo(),
-                  _buildDescription(),
                   _buildInformation(),
                   _buildChapterRangeSelector(),
                   _buildActionButtons(),
@@ -1166,11 +1386,12 @@ class _CrawlScreenState extends State<CrawlScreen> {
   }
 
   // =========================================================
-  // MAL CANDIDATES
+
+  // MAL INFO
   // =========================================================
 
   Widget _buildMalCandidates() {
-    if (malCandidates.isEmpty) {
+    if (!showMalCandidates || malCandidates.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -1188,7 +1409,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Chọn truyện trên MyAnimeList',
+                      'Chọn lại truyện trên MyAnimeList',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -1209,11 +1430,8 @@ class _CrawlScreenState extends State<CrawlScreen> {
                     final candidate = malCandidates[index];
 
                     final title = candidate['title']?.toString() ?? '';
-
                     final cover = candidate['cover']?.toString() ?? '';
-
                     final malId = candidate['malId']?.toString() ?? '';
-
                     final type = candidate['type']?.toString() ?? '';
 
                     final isSelected =
@@ -1266,6 +1484,18 @@ class _CrawlScreenState extends State<CrawlScreen> {
     );
   }
 
+  Future<void> _selectMalCandidate(Map<String, dynamic> candidate) async {
+    final malId = _readStoryId(candidate['malId']);
+    print(
+      '[CrawlScreen][_selectMalCandidate] candidate malId=$malId title=${candidate['title']}',
+    );
+    if (malId == null) return;
+    setState(() {
+      showMalCandidates = false;
+    });
+    await _loadMalDetail(malId);
+  }
+
   Widget _malCandidatePlaceholder() {
     return Container(
       width: 40,
@@ -1278,10 +1508,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
       ),
     );
   }
-
-  // =========================================================
-  // MAL INFO
-  // =========================================================
 
   Widget _buildMalInfo() {
     if (malInfo == null) {
@@ -1304,6 +1530,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
     final cover = _malString(malInfo!['cover']);
     final score = _malString(malInfo!['score']);
     final genres = _malStringList(malInfo!['genres']);
+    final crawlOriginalTitle = _crawlUsedAlternative ? _crawlOriginalTitle : null;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -1358,6 +1585,22 @@ class _CrawlScreenState extends State<CrawlScreen> {
                               ),
                             ),
                             const Spacer(),
+                            if (malCandidates.length > 1)
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.refresh,
+                                  color: Colors.amber,
+                                  size: 18,
+                                ),
+                                tooltip: 'Đổi truyện MyAnimeList',
+                                onPressed: importing || malLoading
+                                    ? null
+                                    : () {
+                                        setState(() {
+                                          showMalCandidates = true;
+                                        });
+                                      },
+                              ),
                             if (score.isNotEmpty)
                               Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -1410,6 +1653,16 @@ class _CrawlScreenState extends State<CrawlScreen> {
                   icon: Icons.translate,
                   label: 'Japanese Title',
                   value: japaneseTitle,
+                ),
+              ],
+
+              // TruyenGGVN ten goc (luu thanh Alternative Name).
+              if (crawlOriginalTitle != null && crawlOriginalTitle.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                _buildMalMetadataRow(
+                  icon: Icons.title_outlined,
+                  label: 'Tên gốc',
+                  value: crawlOriginalTitle,
                 ),
               ],
 
@@ -1540,7 +1793,9 @@ class _CrawlScreenState extends State<CrawlScreen> {
     if (malInfo != null) return const SizedBox.shrink();
 
     final title = data?['title']?.toString().trim() ?? '';
-    final cover = data?['cover']?.toString().trim() ?? '';
+    final coverFromData = data?['cover']?.toString().trim() ?? '';
+    final coverFromUrl = data?['coverUrl']?.toString().trim() ?? '';
+    final cover = coverFromData.isNotEmpty ? coverFromData : coverFromUrl;
 
     if (title.isEmpty && cover.isEmpty) return const SizedBox.shrink();
 
@@ -1561,6 +1816,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
                     child: cover.isNotEmpty
                         ? Image.network(
                             cover,
+                            headers: _imageHeaders(data?['url']),
                             width: 90,
                             height: 130,
                             fit: BoxFit.cover,
@@ -1583,6 +1839,24 @@ class _CrawlScreenState extends State<CrawlScreen> {
                   ),
                 ],
               ),
+              if (malStatus == 'NOT_FOUND') ...[
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.block, color: Colors.grey[500], size: 14),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Không có trên MyAnimeList',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
@@ -1690,35 +1964,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
   // DESCRIPTION
   // =========================================================
 
-  Widget _buildDescription() {
-    final description = data!['description']?.toString() ?? '';
-
-    if (description.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Card(
-        elevation: 0,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Mô tả truyện',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              ExpandableText(text: description, maxLines: 3),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   // =========================================================
   // INFORMATION
   // =========================================================
@@ -1759,63 +2004,158 @@ class _CrawlScreenState extends State<CrawlScreen> {
   }
 
   Widget _buildInformation() {
-    final List<Map<String, String>> websiteInfo = [];
-    final seen = <String>{};
-
-    void addInfo(String label, dynamic rawValue) {
-      final normalizedLabel = label.trim();
-      final value = _formatMalValue(rawValue);
-
-      if (normalizedLabel.isEmpty || value.isEmpty) return;
-
-      final key = '$normalizedLabel\u0000$value';
-
-      if (seen.add(key)) {
-        websiteInfo.add({'label': normalizedLabel, 'value': value});
-      }
+    // Khi đã có MAL, không hiển thị thêm thông tin từ website source.
+    if (malInfo != null) {
+      return const SizedBox.shrink();
     }
 
-    // Chỉ hiển thị information do website crawler trả về.
-    // Thông tin MAL đã được trình bày riêng ở _buildMalInfo().
     final rawWebsiteInfo = data?['information'];
+    final Map<String, String> infoMap = {};
 
     if (rawWebsiteInfo is List) {
       for (final item in rawWebsiteInfo) {
         if (item is Map) {
-          final label = item['label']?.toString() ?? '';
-          addInfo(label, item['value']);
+          final label = item['label']?.toString().trim();
+          final value = _formatMalValue(item['value']);
+          if (label != null && label.isNotEmpty && value.isNotEmpty) {
+            infoMap[label] = value;
+          }
         }
       }
     } else if (rawWebsiteInfo is Map) {
       for (final entry in rawWebsiteInfo.entries) {
-        addInfo(entry.key.toString(), entry.value);
+        final label = entry.key.toString().trim();
+        final value = _formatMalValue(entry.value);
+        if (label.isNotEmpty && value.isNotEmpty) {
+          infoMap[label] = value;
+        }
       }
     }
 
-    if (websiteInfo.isEmpty) {
+    final genres = infoMap['Genres'];
+
+    // Tìm tác giả theo key chứa "author" (không phân biệt hoa thường).
+    String? authors;
+    for (final entry in infoMap.entries) {
+      if (entry.key.toLowerCase().contains('author')) {
+        authors = entry.value.trim();
+        break;
+      }
+    }
+
+    // TruyenGGVN dùng "Đang Cập Nhật" làm placeholder cho tác giả → bỏ qua.
+    final showAuthors = authors != null &&
+        authors.isNotEmpty &&
+        authors.toLowerCase() != 'đang cập nhật';
+
+    // Các label vô nghĩa, bỏ hoàn toàn (Views, Likes, Follows, Status).
+    final skippedLabels = {'Views', 'Likes', 'Follows', 'Status'};
+
+    // Các field đã được đưa ra ngoài (genre, author) thì không còn hiển thị trong dropdown.
+    final remainingKeys = infoMap.keys
+        .where((k) =>
+            !skippedLabels.contains(k) &&
+            k != 'Genres' &&
+            !k.toLowerCase().contains('author'))
+        .toList();
+
+    if ((genres == null || genres.isEmpty) &&
+        !showAuthors &&
+        remainingKeys.isEmpty) {
       return const SizedBox.shrink();
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Card(
-        elevation: 0,
-        child: ExpansionTile(
-          initiallyExpanded: false,
-          title: Text(
-            'Thông tin từ website (${websiteInfo.length})',
-            style: const TextStyle(fontWeight: FontWeight.bold),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Genres hiển thị thành chip (giống MAL).
+              if (genres != null && genres.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                _buildMalSectionTitle(
+                  icon: Icons.local_offer_outlined,
+                  title: 'Thể loại',
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 7,
+                  children: genres
+                      .split(RegExp(r'[,;，；]'))
+                      .map((g) {
+                    final trimmed = g.trim();
+                    if (trimmed.isEmpty) return const SizedBox.shrink();
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .secondaryContainer,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        trimmed,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSecondaryContainer,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    );
+                  })
+                      .toList(),
+                ),
+              ],
+
+        // Tác giả (bỏ qua nếu là "Đang Cập Nhật").
+        if (showAuthors) ...[
+          const SizedBox(height: 16),
+          _buildMalSectionTitle(
+            icon: Icons.info_outline,
+            title: 'Thông tin từ website',
           ),
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: Column(
-                children: websiteInfo.map<Widget>((item) {
-                  return _buildInfoRow(item['label']!, item['value']!);
-                }).toList(),
+          const SizedBox(height: 10),
+          _buildMalMetadataRow(
+            icon: Icons.person_outline,
+            label: 'Tác giả',
+            value: authors!,
+          ),
+        ],
+
+        // Các field còn lại giữ trong dropdown.
+        if (remainingKeys.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Card(
+            elevation: 0,
+            child: ExpansionTile(
+              initiallyExpanded: false,
+              title: Text(
+                'Thông tin từ website (${remainingKeys.length})',
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Column(
+                    children: remainingKeys.map<Widget>((label) {
+                      return _buildInfoRow(label, infoMap[label]!);
+                    }).toList(),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
+        ],
+            ],
+          ),
         ),
       ),
     );

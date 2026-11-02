@@ -96,13 +96,18 @@ class StoryFetcher {
   ///
   /// Offline: chỉ tìm trong các truyện đã tải hoàn chỉnh.
   /// Online: tìm kiếm trên server.
-  Future<List> search(String keyword) async {
+  Future<List> search(String keyword, {List<String>? genres}) async {
     if (OfflineModeService.isOffline.value) {
       return OfflineEntryService.instance.searchStories(keyword);
     }
     final uri = Uri.parse(
       '${ApiConfig.api}/stories/search',
-    ).replace(queryParameters: {'keyword': keyword});
+    ).replace(queryParameters: {
+      'keyword': keyword,
+      if (genres != null && genres.isNotEmpty) ...{
+        for (final g in genres) 'genre': g,
+      },
+    });
     final res = await http.get(uri);
     if (res.statusCode == 200) {
       final data = jsonDecode(utf8.decode(res.bodyBytes));
@@ -110,6 +115,19 @@ class StoryFetcher {
       throw Exception('Dữ liệu tìm kiếm không hợp lệ.');
     }
     throw Exception('Search failed');
+  }
+
+  /// Lấy danh sách thể loại để lọc.
+  Future<List<String>> getGenres() async {
+    final res = await http.get(
+      Uri.parse('${ApiConfig.api}/stories/genres'),
+    );
+    if (res.statusCode == 200) {
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      if (data is List) return data.cast<String>();
+      throw Exception('Dữ liệu thể loại không hợp lệ.');
+    }
+    throw Exception('Failed to load genres');
   }
 
   /// Lấy thông tin rút gọn của truyện.

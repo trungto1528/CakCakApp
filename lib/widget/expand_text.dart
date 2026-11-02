@@ -5,7 +5,7 @@ class ExpandableText extends StatefulWidget {
   const ExpandableText({
     super.key,
     required this.text,
-    this.maxLines = 3,
+    this.maxLines = 2,
   });
   @override
   State<ExpandableText> createState() => _ExpandableTextState();

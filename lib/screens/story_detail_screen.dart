@@ -575,6 +575,147 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       ),
     );
   }
+
+  /// Chuẩn hóa chuỗi để so sánh: bỏ khoảng trắng, ký tự đặc biệt, viết thường.
+  String _normalizeLabel(String s) {
+    return s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+  }
+
+  String _infoValue(String key) {
+    final information = story['information'] is List
+        ? story['information'] as List
+        : <dynamic>[];
+    final normKey = _normalizeLabel(key);
+    for (final item in information) {
+      if (item is! Map) continue;
+      final label = item['label']?.toString() ?? '';
+      if (_normalizeLabel(label).contains(normKey)) {
+        return item['value']?.toString() ?? '';
+      }
+    }
+    return '';
+  }
+
+  /// Lấy tất cả giá trị có label chứa bất kỳ từ khóa nào trong danh sách
+  /// (ví dụ: ['synonym', 'alternative'] để lấy Synonyms, Alternative Name...).
+  List<String> _infoValues(List<String> keys) {
+    final information = story['information'] is List
+        ? story['information'] as List
+        : <dynamic>[];
+    final result = <String>[];
+    final normKeys = keys.map((k) => _normalizeLabel(k)).toList();
+    for (final item in information) {
+      if (item is! Map) continue;
+      final label = _normalizeLabel(item['label']?.toString() ?? '');
+      if (normKeys.any((k) => label.contains(k))) {
+        final value = item['value']?.toString() ?? '';
+        if (value.isNotEmpty) {
+          result.addAll(value
+              .split(RegExp(r'[,;，；]'))
+              .map((e) => e.trim())
+              .where((e) => e.isNotEmpty));
+        }
+      }
+    }
+    return result.toSet().toList(); // Loại trùng, giữ thứ tự.
+  }
+
+  List<String> _infoGenres() {
+    final val = _infoValue('Genres');
+    if (val.isEmpty) return [];
+    return val
+        .split(RegExp(r'[,;，；]'))
+        .map((g) => g.trim())
+        .where((g) => g.isNotEmpty)
+        .toList();
+  }
+
+  Widget _buildMalMetadataRow({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 17, color: Colors.grey[600]),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 105,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey[600],
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              height: 1.35,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMalBadge({
+    required IconData icon,
+    required String text,
+    Color? color,
+  }) {
+    final badgeColor = color ?? Colors.grey[700]!;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: badgeColor.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: badgeColor),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            style: TextStyle(
+              color: badgeColor,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMalSectionTitle({
+    required IconData icon,
+    required String title,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, size: 17, color: Colors.grey[600]),
+        const SizedBox(width: 8),
+        Text(
+          title,
+          style: TextStyle(
+            fontSize: 13,
+            color: Colors.grey[600],
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildInformation() {
     final information = story['information'] is List
         ? story['information'] as List
@@ -582,71 +723,254 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     if (information.isEmpty) {
       return const SizedBox.shrink();
     }
+
+    final authors = _infoValue('Authors');
+    final type = _infoValue('Type');
+    final status = _infoValue('Status');
+    final score = _infoValue('Score');
+    final malId = _infoValue('ID');
+    final malUrl = _infoValue('URL');
+    final source = _infoValue('Nguồn');
+    final genres = _infoGenres();
+    final altNames = _infoValues(['synonym', 'alternative', 'tên khác']);
+    final englishTitle = _infoValue('English Title');
+    final japaneseTitle = _infoValue('Japanese Title');
+
+    final isMal = source == 'MyAnimeList' || malId.isNotEmpty;
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.shade200),
-        ),
-        child: Theme(
-          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-          child: ExpansionTile(
-            initiallyExpanded: false,
-            tilePadding: const EdgeInsets.symmetric(horizontal: 14),
-            childrenPadding: const EdgeInsets.only(bottom: 8),
-            title: const Text(
-              'Thông tin thêm',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            subtitle: Text(
-              '${information.length} thông tin',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-            ),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              ...information.asMap().entries.map((entry) {
-                final index = entry.key;
-                final item = entry.value;
-                if (item is! Map) {
-                  return const SizedBox.shrink();
-                }
-                final label = item['label']?.toString() ?? '';
-                final value = item['value']?.toString() ?? '';
-                return Column(
-                  children: [
-                    Padding(
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isMal)
+                    Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 10,
+                        horizontal: 8,
+                        vertical: 4,
                       ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SizedBox(
-                            width: 100,
-                            child: Text(
-                              label,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              value,
-                              style: TextStyle(color: Colors.grey.shade700),
-                            ),
-                          ),
-                        ],
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        'MyAnimeList',
+                        style: TextStyle(
+                          color: Colors.blue,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
-                    if (index != information.length - 1)
-                      Divider(height: 1, color: Colors.grey.shade200),
+                  if (source.isNotEmpty && !isMal)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        'Nguồn: $source',
+                        style: TextStyle(
+                          color: Colors.grey[700],
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  const Spacer(),
+                  if (score.isNotEmpty)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.star,
+                          color: Colors.amber,
+                          size: 17,
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          score,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+
+              // Authors.
+              if (authors.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                _buildMalMetadataRow(
+                  icon: Icons.person_outline,
+                  label: 'Authors',
+                  value: authors,
+                ),
+              ],
+
+              // Các tên khác / Alternative names (hiển thị thành chip).
+              if (altNames.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                _buildMalSectionTitle(
+                  icon: Icons.title_outlined,
+                  title: 'Các tên khác',
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 7,
+                  children: altNames.map((name) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .secondaryContainer,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        name,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSecondaryContainer,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+
+              // English Title.
+              if (englishTitle.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                _buildMalMetadataRow(
+                  icon: Icons.title,
+                  label: 'English Title',
+                  value: englishTitle,
+                ),
+              ],
+
+              // Japanese Title.
+              if (japaneseTitle.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                _buildMalMetadataRow(
+                  icon: Icons.title,
+                  label: 'Japanese Title',
+                  value: japaneseTitle,
+                ),
+              ],
+
+              // Type and status.
+              if (type.isNotEmpty || status.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (type.isNotEmpty)
+                      _buildMalBadge(
+                          icon: Icons.category_outlined, text: type),
+                    if (status.isNotEmpty)
+                      _buildMalBadge(
+                        icon: Icons.check_circle_outline,
+                        text: status,
+                        color: status.toLowerCase() == 'finished'
+                            ? Colors.green
+                            : null,
+                      ),
                   ],
-                );
-              }),
+                ),
+              ],
+
+              // Genres (tách riêng thành các chip).
+              if (genres.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                _buildMalSectionTitle(
+                  icon: Icons.local_offer_outlined,
+                  title: 'Genres',
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 7,
+                  children: genres.map((genre) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .secondaryContainer,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        genre,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSecondaryContainer,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+
+              // MAL ID / URL và nguồn.
+              if (malId.isNotEmpty || malUrl.isNotEmpty || source.isNotEmpty)
+                ...[
+                  const SizedBox(height: 14),
+                  const Divider(height: 1),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      if (malId.isNotEmpty)
+                        Text(
+                          'MAL ID: $malId',
+                          style: TextStyle(
+                              fontSize: 11, color: Colors.grey[600]),
+                        ),
+                      const Spacer(),
+                      if (malUrl.isNotEmpty)
+                        TextButton.icon(
+                          onPressed: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                  content: Text('MAL URL: $malUrl')));
+                          },
+                          icon: const Icon(Icons.link, size: 15),
+                          label: const Text('MAL'),
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ),
+                      if (source.isNotEmpty && malId.isEmpty)
+                        Text(
+                          'Nguồn: $source',
+                          style: TextStyle(
+                              fontSize: 11, color: Colors.grey[600]),
+                        ),
+                    ],
+                  ),
+                ],
             ],
           ),
         ),
@@ -679,8 +1003,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    Text('Tác giả: ${story['author'] ?? ''}'),
-                    const SizedBox(height: 6),
                     Text('Tạo bởi: ${story['createdByName'] ?? ''}'),
                     if (_isOffline) ...[
                       const SizedBox(height: 8),
