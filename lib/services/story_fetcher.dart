@@ -100,15 +100,22 @@ class StoryFetcher {
     if (OfflineModeService.isOffline.value) {
       return OfflineEntryService.instance.searchStories(keyword);
     }
-    final uri = Uri.parse(
-      '${ApiConfig.api}/stories/search',
-    ).replace(queryParameters: {
-      'keyword': keyword,
-      if (genres != null && genres.isNotEmpty) ...{
-        for (final g in genres) 'genre': g,
-      },
-    });
-    final res = await http.get(uri);
+    final query = <String>[];
+    final kw = keyword.trim();
+    if (kw.isNotEmpty) {
+      query.add('keyword=${Uri.encodeQueryComponent(kw)}');
+    }
+    if (genres != null) {
+      for (final g in genres) {
+        final trimmed = g.trim();
+        if (trimmed.isNotEmpty) {
+          query.add('genre=${Uri.encodeQueryComponent(trimmed)}');
+        }
+      }
+    }
+    final url = '${ApiConfig.api}/stories/search'
+        '${query.isEmpty ? '' : '?${query.join('&')}'}';
+    final res = await http.get(Uri.parse(url));
     if (res.statusCode == 200) {
       final data = jsonDecode(utf8.decode(res.bodyBytes));
       if (data is List) return data;

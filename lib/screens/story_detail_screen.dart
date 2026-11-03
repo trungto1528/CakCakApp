@@ -596,30 +596,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     return '';
   }
 
-  /// Lấy tất cả giá trị có label chứa bất kỳ từ khóa nào trong danh sách
-  /// (ví dụ: ['synonym', 'alternative'] để lấy Synonyms, Alternative Name...).
-  List<String> _infoValues(List<String> keys) {
-    final information = story['information'] is List
-        ? story['information'] as List
-        : <dynamic>[];
-    final result = <String>[];
-    final normKeys = keys.map((k) => _normalizeLabel(k)).toList();
-    for (final item in information) {
-      if (item is! Map) continue;
-      final label = _normalizeLabel(item['label']?.toString() ?? '');
-      if (normKeys.any((k) => label.contains(k))) {
-        final value = item['value']?.toString() ?? '';
-        if (value.isNotEmpty) {
-          result.addAll(value
-              .split(RegExp(r'[,;，；]'))
-              .map((e) => e.trim())
-              .where((e) => e.isNotEmpty));
-        }
-      }
-    }
-    return result.toSet().toList(); // Loại trùng, giữ thứ tự.
-  }
-
   List<String> _infoGenres() {
     final val = _infoValue('Genres');
     if (val.isEmpty) return [];
@@ -732,9 +708,16 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     final malUrl = _infoValue('URL');
     final source = _infoValue('Nguồn');
     final genres = _infoGenres();
-    final altNames = _infoValues(['synonym', 'alternative', 'tên khác']);
+    final synonyms = _infoValue('Synonyms');
     final englishTitle = _infoValue('English Title');
     final japaneseTitle = _infoValue('Japanese Title');
+    // "Các tên khác" chỉ gồm Synonyms, English Title, Japanese Title;
+    // mỗi tên hiển thị riêng một dòng, giữ nguyên giá trị (không tách dấu phẩy).
+    final altNameEntries = <MapEntry<String, String>>[
+      if (synonyms.isNotEmpty) MapEntry('Synonyms', synonyms),
+      if (englishTitle.isNotEmpty) MapEntry('English Title', englishTitle),
+      if (japaneseTitle.isNotEmpty) MapEntry('Japanese Title', japaneseTitle),
+    ];
 
     final isMal = source == 'MyAnimeList' || malId.isNotEmpty;
 
@@ -820,61 +803,20 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                 ),
               ],
 
-              // Các tên khác / Alternative names (hiển thị thành chip).
-              if (altNames.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                _buildMalSectionTitle(
-                  icon: Icons.title_outlined,
-                  title: 'Các tên khác',
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 7,
-                  runSpacing: 7,
-                  children: altNames.map((name) {
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .secondaryContainer,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        name,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSecondaryContainer,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
+              // Các tên khác: Synonyms, English Title, Japanese Title (mỗi tên một dòng).
+              if (altNameEntries.isNotEmpty) ...[
+                for (final entry in altNameEntries)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: _buildMalMetadataRow(
+                      icon: Icons.title,
+                      label: entry.key,
+                      value: entry.value,
+                    ),
+                  ),
               ],
 
-              // English Title.
-              if (englishTitle.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                _buildMalMetadataRow(
-                  icon: Icons.title,
-                  label: 'English Title',
-                  value: englishTitle,
-                ),
-              ],
-
-              // Japanese Title.
-              if (japaneseTitle.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                _buildMalMetadataRow(
-                  icon: Icons.title,
-                  label: 'Japanese Title',
-                  value: japaneseTitle,
-                ),
-              ],
+              // English Title / Japanese Title đã nằm trong "Các tên khác".
 
               // Type and status.
               if (type.isNotEmpty || status.isNotEmpty) ...[

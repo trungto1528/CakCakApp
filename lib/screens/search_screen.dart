@@ -134,21 +134,23 @@ class _SearchScreenState extends State<SearchScreen> {
     if (widget.initialGenres != null && widget.initialGenres!.isNotEmpty) {
       selectedGenres.addAll(widget.initialGenres!);
     }
-    if (keyword.isNotEmpty) {
+    if (keyword.isNotEmpty || selectedGenres.isNotEmpty) {
       _search(keyword);
     }
   }
 
   Future<void> _search(String keyword) async {
-    if (keyword.isEmpty) {
+    final hasKeyword = keyword.trim().isNotEmpty;
+    final hasGenres = selectedGenres.isNotEmpty;
+    if (!hasKeyword && !hasGenres) {
       setState(() => stories = []);
       return;
     }
     setState(() => isLoading = true);
     try {
       final data = await StoryFetcher().search(
-        keyword,
-        genres: selectedGenres.isEmpty ? null : selectedGenres.toList(),
+        keyword.trim(),
+        genres: hasGenres ? selectedGenres.toList() : null,
       );
       if (!mounted) return;
       setState(() {
@@ -262,8 +264,7 @@ class _SearchScreenState extends State<SearchScreen> {
                         ..addAll(tempSelection);
                     });
                     Navigator.pop(dialogContext);
-                    final kw = controller.text.trim();
-                    if (kw.isNotEmpty) _search(kw);
+                    _search(controller.text.trim());
                   },
                   child: const Text('Áp dụng'),
                 ),
@@ -327,8 +328,7 @@ class _SearchScreenState extends State<SearchScreen> {
               label: Text('${selectedGenres.length} thể loại'),
               onDeleted: () {
                 setState(() => selectedGenres.clear());
-                final kw = controller.text.trim();
-                if (kw.isNotEmpty) _search(kw);
+                _search(controller.text.trim());
               },
             ),
         ],
@@ -341,8 +341,8 @@ class _SearchScreenState extends State<SearchScreen> {
     if (isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (keyword.isEmpty) {
-      return const Center(child: Text("Nhập từ khóa để tìm truyện"));
+    if (keyword.isEmpty && selectedGenres.isEmpty) {
+      return const Center(child: Text("Nhập từ khóa hoặc chọn thể loại để tìm truyện"));
     }
     if (stories.isEmpty) {
       return const Center(child: Text("Không tìm thấy kết quả"));
