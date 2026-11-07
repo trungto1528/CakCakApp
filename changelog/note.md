@@ -1,4 +1,5 @@
 # Changelog
 
-## Icon
-- Éo có j cả, thêm cái icon thôi :) 
+## CrawlScreen + StoryDetailScreen
+- Chuyển sang đi ăn trộm của MangaDex.
+- Hiển thị cả các tên ngôn ngữ khác.

@@ -62,7 +62,6 @@ class _HomePageState extends State<HomePage> with RouteAware {
   @override
   void dispose() {
     _debounce?.cancel();
-    super.dispose();
     _offlineSearchController.dispose();
     OfflineModeService.isOffline.removeListener(
       _onOfflineModeChanged,

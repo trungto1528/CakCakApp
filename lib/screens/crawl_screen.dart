@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import '../models/metadata_provider.dart';
 import '../services/crawl_service.dart';
-import '../widget/expand_text.dart';
 
 class CrawlScreen extends StatefulWidget {
   final int userId;
@@ -36,12 +38,8 @@ class _CrawlScreenState extends State<CrawlScreen> {
 
   Timer? _progressTimer;
 
-  Map<String, dynamic>? malInfo;
-  List<Map<String, dynamic>> malCandidates = [];
-  bool showMalCandidates = false;
+  MetadataProvider? _metaProvider;
 
-  bool malLoading = false;
-  String? malStatus;
   String? _crawlUrlPending;
 
   // TruyenGGVN: ten goc va trang thai dung alternative name de hien thi tren UI.
@@ -142,61 +140,74 @@ class _CrawlScreenState extends State<CrawlScreen> {
     return int.tryParse(value?.toString() ?? '');
   }
 
-  /// Chuyển giá trị MAL thành chuỗi an toàn để hiển thị.
-  String _malString(dynamic value) {
-    if (value == null) return '';
-
-    if (value is String) {
-      return value.trim();
-    }
-
+  List<String> _parseAllTitles(dynamic value) {
+    if (value == null) return const [];
     if (value is List) {
-      return value
-          .map((item) => _malString(item))
-          .where((item) => item.isNotEmpty)
-          .join(', ');
+      return value.whereType<String>().toList();
     }
-
-    if (value is Map) {
-      return value.entries
-          .map((entry) {
-            final key = entry.key.toString().trim();
-            final content = _malString(entry.value);
-
-            if (key.isEmpty || content.isEmpty) return '';
-
-            return '$key: $content';
-          })
-          .where((item) => item.isNotEmpty)
-          .join('\n');
+    if (value is String) {
+      if (value.isEmpty) return const [];
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is List) {
+          return decoded.whereType<String>().toList();
+        }
+      } catch (_) {}
     }
-
-    return value.toString().trim();
+    return const [];
   }
 
-  /// Lấy danh sách string từ field MAL.
-  List<String> _malStringList(dynamic value) {
-    if (value == null) return [];
-
-    if (value is List) {
-      return value
-          .map((item) => _malString(item))
-          .where((item) => item.isNotEmpty)
-          .toList();
+  Map<String, List<String>> _parseAllTitlesByLocale(dynamic value) {
+    final result = <String, List<String>>{};
+    if (value == null) return result;
+    if (value is Map) {
+      value.forEach((k, v) {
+        final locale = k.toString();
+        if (v is List) {
+          result[locale] = v.whereType<String>().toList();
+        } else if (v is String) {
+          result[locale] = [v];
+        }
+      });
     }
-
     if (value is String) {
-      final text = value.trim();
-      if (text.isEmpty) return [];
-
-      return text
-          .split(RegExp(r'[,;]'))
-          .map((item) => item.trim())
-          .where((item) => item.isNotEmpty)
-          .toList();
+      if (value.isEmpty) return result;
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is Map) {
+          decoded.forEach((k, v) {
+            final locale = k.toString();
+            if (v is List) {
+              result[locale] = v.whereType<String>().toList();
+            } else if (v is String) {
+              result[locale] = [v];
+            }
+          });
+        }
+      } catch (_) {}
     }
+    return result;
+  }
 
-    return [_malString(value)].where((item) => item.isNotEmpty).toList();
+  String _localeLabel(String locale) {
+    switch (locale) {
+      case 'vi':
+        return 'Tên (vi)';
+      case 'en':
+        return 'Tên (en)';
+      case 'ja':
+        return 'Tên (ja)';
+      case 'ja-ro':
+        return 'Tên (ja-ro)';
+      case 'zh':
+        return 'Tên (zh)';
+      case 'zh-ro':
+        return 'Tên (zh-ro)';
+      case 'ko':
+        return 'Tên (ko)';
+      default:
+        return 'Tên ($locale)';
+    }
   }
 
   // =========================================================
@@ -384,11 +395,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
       _selectedStoryId = null;
       _createNewStory = true;
       chapterRangeController.clear();
-      malInfo = null;
-      malStatus = null;
-      malCandidates = [];
-      showMalCandidates = false;
-      _crawlUrlPending = null;
       _crawlUrlPending = null;
     });
 
@@ -419,7 +425,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
   // =========================================================
   // SELECT SEARCH RESULT
   // =========================================================
-
   Future<void> selectSearchResult(Map<String, dynamic> result) async {
     final url = _getResultUrl(result);
 
@@ -443,18 +448,17 @@ class _CrawlScreenState extends State<CrawlScreen> {
       _selectedStoryId = null;
       _createNewStory = true;
       chapterRangeController.clear();
-      malInfo = null;
-      malStatus = null;
+      _metaProvider = null;
       _crawlOriginalTitle = null;
       _crawlUsedAlternative = false;
     });
 
     _crawlUrlPending = url;
 
-      Map<String, dynamic>? preCrawledData;
-      String? alternativeName;
-      bool alternativeUsed = false;
-      String? originalTitle;
+    Map<String, dynamic>? preCrawledData;
+    String? alternativeName;
+    bool alternativeUsed = false;
+    String? originalTitle;
 
     try {
       final title = result['title']?.toString().trim() ?? '';
@@ -473,137 +477,74 @@ class _CrawlScreenState extends State<CrawlScreen> {
         );
       }
 
-      print('[CrawlScreen][selectSearchResult] goi searchMal title="$title"');
-      final malResult = await crawlService.searchMal(title);
+      print(
+        '[CrawlScreen][selectSearchResult] goi searchMangaDex title="$title"',
+      );
+      final mdResult = await crawlService.searchMangaDex(title);
       if (!mounted) return;
 
-      final status = malResult['status']?.toString() ?? '';
+      final mdStatus = mdResult['status']?.toString() ?? '';
       print(
-        '[CrawlScreen][selectSearchResult] MAL status=$status malId=${malResult['malId']} resultsCount=${(malResult['results'] as List?)?.length ?? 0}',
+        '[CrawlScreen][selectSearchResult] MangaDex status=$mdStatus mangaDexId=${mdResult['mangaDexId']} resultsCount=${(mdResult['results'] as List?)?.length ?? 0}',
       );
-      setState(() {
-        malStatus = status;
-      });
 
-      // Neu title khong search ra va co alternative name, thu search lai bang alternative name.
-      Map<String, dynamic>? effectiveMalResult = malResult;
-      String effectiveStatus = status;
-
-      if (isTruyenGGVN &&
-          (status == 'NOT_FOUND' || status.isEmpty) &&
-          alternativeName != null &&
-          alternativeName.isNotEmpty) {
+      // MangaDex la chinh.
+      if (mdStatus == 'DIRECT_MATCH') {
+        final mangaDexId = mdResult['mangaDexId']?.toString();
         print(
-          '[CrawlScreen][selectSearchResult] Title khong tim thay, thu alternative name="$alternativeName"',
+          '[CrawlScreen][selectSearchResult] MangaDex DIRECT_MATCH mangaDexId=$mangaDexId',
         );
-        final altResult = await crawlService.searchMal(alternativeName);
-        if (!mounted) return;
-        final altStatus = altResult['status']?.toString() ?? '';
-        print(
-          '[CrawlScreen][selectSearchResult] Alternative MAL status=$altStatus malId=${altResult['malId']}',
-        );
-        if (altStatus == 'DIRECT_MATCH' || altStatus == 'MULTIPLE_RESULTS') {
-          alternativeUsed = true;
-          effectiveMalResult = altResult;
-          effectiveStatus = altStatus;
-          originalTitle = title;
+        if (mangaDexId != null && mangaDexId.isNotEmpty) {
+          _metaProvider = MetadataProvider.mangaDex;
+          await _loadMangaDexDetail(
+            mangaDexId,
+            preCrawledData: preCrawledData,
+            originalTitle: originalTitle,
+          );
           if (!mounted) return;
-          setState(() {
-            _crawlOriginalTitle = title;
-            _crawlUsedAlternative = true;
-          });
-        } else {
-          print(
-            '[CrawlScreen][selectSearchResult] Alternative cung khong tim thay -> malInfo=null',
-          );
+          return;
         }
-      }
-
-      if (effectiveStatus == 'DIRECT_MATCH') {
-        final malId = (effectiveMalResult!['malId'] as num?)?.toInt();
-        print('[CrawlScreen][selectSearchResult] DIRECT_MATCH malId=$malId');
-        if (malId != null) {
-          await _loadMalDetail(malId,
-              preCrawledData: preCrawledData,
-              malAlternativeUsed: alternativeUsed,
-              originalTitle: originalTitle);
-        } else {
-          print(
-            '[CrawlScreen][selectSearchResult] DIRECT_MATCH khong co malId -> _fetchChapters malInfo=null',
-          );
-          await _fetchChapters(url,
-              malInfo: null,
-              preCrawledData: preCrawledData,
-              malAlternativeUsed: alternativeUsed,
-              originalTitle: originalTitle);
-        }
-      } else if (effectiveStatus == 'MULTIPLE_RESULTS') {
-        final results = effectiveMalResult!['results'] as List?;
+      } else if (mdStatus == 'MULTIPLE_RESULTS') {
+        final results = mdResult['results'] as List?;
         final resultsCount = results?.length ?? 0;
         print(
-          '[CrawlScreen][selectSearchResult] MULTIPLE_RESULTS resultsCount=$resultsCount',
+          '[CrawlScreen][selectSearchResult] MangaDex MULTIPLE_RESULTS resultsCount=$resultsCount',
         );
         if (results != null && results.isNotEmpty) {
           final candidates = results
               .map<Map<String, dynamic>>(
-                  (item) => Map<String, dynamic>.from(item as Map))
+                (item) => Map<String, dynamic>.from(item as Map),
+              )
               .toList();
 
-          final first = candidates.first;
-          final firstMalId = _readStoryId(first['malId']);
-          print(
-            '[CrawlScreen][selectSearchResult] MULTIPLE_RESULTS -> chon candidate dau tien malId=$firstMalId title=${first['title']}',
-          );
-
           setState(() {
-            malCandidates = candidates;
-            showMalCandidates = false;
+            _metaProvider = MetadataProvider.mangaDex;
           });
-
-          if (firstMalId != null) {
-            await _loadMalDetail(firstMalId,
-                preCrawledData: preCrawledData,
-                malAlternativeUsed: alternativeUsed,
-                originalTitle: originalTitle);
-          } else {
-            print(
-              '[CrawlScreen][selectSearchResult] MULTIPLE_RESULTS candidate dau tien khong co malId -> _fetchChapters malInfo=null',
-            );
-            await _fetchChapters(url,
-                malInfo: null,
-                preCrawledData: preCrawledData,
-                malAlternativeUsed: alternativeUsed,
-                originalTitle: originalTitle);
-          }
-        } else {
-          print(
-            '[CrawlScreen][selectSearchResult] MULTIPLE_RESULTS khong co candidate -> _fetchChapters malInfo=null',
-          );
-          await _fetchChapters(url,
-              malInfo: null,
-              preCrawledData: preCrawledData,
-              malAlternativeUsed: alternativeUsed,
-              originalTitle: originalTitle);
         }
       } else {
         print(
-          '[CrawlScreen][selectSearchResult] status khac ($effectiveStatus) -> _fetchChapters malInfo=null',
+          '[CrawlScreen][selectSearchResult] MangaDex status khac ($mdStatus)',
         );
-        await _fetchChapters(url,
-            malInfo: null,
-            preCrawledData: preCrawledData,
-            malAlternativeUsed: alternativeUsed,
-            originalTitle: originalTitle);
       }
+
+      // Neu MangaDex khong co ket qua hoac loi, fetch chapters bang website data.
+      print(
+        '[CrawlScreen][selectSearchResult] MangaDex khong co DIRECT_MATCH -> fetchChapters',
+      );
+      await _fetchChapters(
+        url,
+        preCrawledData: preCrawledData,
+        originalTitle: originalTitle,
+      );
     } catch (e) {
       if (!mounted) return;
-      print('[CrawlScreen][selectSearchResult] Loi tim MAL: $e');
-      _showSnackBar('Loi tim MAL: $e');
-      await _fetchChapters(url,
-          malInfo: null,
-          preCrawledData: preCrawledData,
-          malAlternativeUsed: alternativeUsed,
-          originalTitle: originalTitle);
+      print('[CrawlScreen][selectSearchResult] Loi: $e');
+      _showSnackBar('Loi tim: $e');
+      await _fetchChapters(
+        url,
+        preCrawledData: preCrawledData,
+        originalTitle: originalTitle,
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -613,14 +554,15 @@ class _CrawlScreenState extends State<CrawlScreen> {
     }
   }
 
-  Future<void> _fetchChapters(String url, {
-    Map<String, dynamic>? malInfo,
+  Future<void> _fetchChapters(
+    String url, {
     Map<String, dynamic>? preCrawledData,
-    bool malAlternativeUsed = false,
     String? originalTitle,
+    Map<String, dynamic>? mangaDexInfo,
+    String? mangaDexId,
   }) async {
     print(
-      '[CrawlScreen][_fetchChapters] bat dau url=$url malInfo null=${malInfo == null} malId=${malInfo?['malId']} preCrawled=${preCrawledData != null}',
+      '[CrawlScreen][_fetchChapters] bat dau url=$url preCrawled=${preCrawledData != null}',
     );
     try {
       Map<String, dynamic> normalizedData;
@@ -644,22 +586,24 @@ class _CrawlScreenState extends State<CrawlScreen> {
             normalizedData['coverUrl']?.toString().trim() ?? '';
       }
 
-      normalizedData['chapters'] = (normalizedData['chapters'] as List? ?? []).map((rawChapter) {
-        final chapter = Map<String, dynamic>.from(rawChapter as Map);
-        final isCrawled = _isCrawled(chapter);
-        chapter['crawled'] = isCrawled;
-        chapter['choosen'] = !isCrawled;
-        return chapter;
-      }).toList();
+      normalizedData['chapters'] = (normalizedData['chapters'] as List? ?? [])
+          .map((rawChapter) {
+            final chapter = Map<String, dynamic>.from(rawChapter as Map);
+            final isCrawled = _isCrawled(chapter);
+            chapter['crawled'] = isCrawled;
+            chapter['choosen'] = !isCrawled;
+            return chapter;
+          })
+          .toList();
 
       final initialStoryId = _readStoryId(normalizedData['selectedStoryId']);
 
-      _mergeMalMetadata(normalizedData, malInfo);
-
-      // TruyenGGVN: neu alternative name duoc dung de search MAL (title khong search ra),
-      // doi vai tro: ten MAL (ten Anh) thanh title, ten goc truyenggvn luu thanh Alternative Name.
-      if (malAlternativeUsed && originalTitle != null && originalTitle.isNotEmpty) {
-        _storeOriginalTitleAsAlternative(normalizedData, originalTitle);
+      if (mangaDexId != null && mangaDexId.isNotEmpty && mangaDexInfo != null) {
+        final mdInfo = MetadataInfo.fromMangaDex(mangaDexInfo);
+        _mergeMetadata(normalizedData, mdInfo);
+        normalizedData['mangaDexId'] = mangaDexId;
+        normalizedData['mangaDexInfo'] = mangaDexInfo;
+        normalizedData['provider'] = 'MangaDex';
       }
 
       if (!mounted) return;
@@ -674,20 +618,19 @@ class _CrawlScreenState extends State<CrawlScreen> {
     }
   }
 
-  void _mergeMalMetadata(Map<String, dynamic> data, Map<String, dynamic>? malInfo) {
-    if (malInfo == null) return;
+  /// Gộp metadata từ provider vào payload crawl.
+  void _mergeMetadata(Map<String, dynamic> data, MetadataInfo info) {
+    data['provider'] = info.provider.label;
 
-    data['malId'] = malInfo['malId'];
+    if (info.provider == MetadataProvider.mangaDex) {
+      data['mangaDexId'] = info.providerId;
+    }
 
-    data['title'] = _malString(malInfo['title']);
+    data['title'] = info.title;
 
-    final malCover = _malString(malInfo['cover']);
-    data['cover'] = malCover;
-    data['coverUrl'] = malCover;
-
-    data['description'] = _malString(malInfo['synopsis']);
-
-    data['author'] = _malString(malInfo['authors']);
+    // Giữ nguyên cover từ source crawler, không ghi đè bằng cover MangaDex.
+    data['description'] = info.synopsis;
+    data['author'] = info.authors;
   }
 
   /// Trich xuat alternative name tu thong tin website da crawl.
@@ -709,83 +652,55 @@ class _CrawlScreenState extends State<CrawlScreen> {
     return null;
   }
 
-  /// Luu ten goc cua truyenggvn thanh Alternative Name khi alternative name
-  /// da duoc dung de lay thong tin MAL (doi vai tro).
-  void _storeOriginalTitleAsAlternative(
-      Map<String, dynamic> data, String originalTitle) {
-    final information = data['information'];
-    if (information is List) {
-      final exists = information.any((item) {
-        return item is Map &&
-            item['label']?.toString().trim() == 'Alternative Name' &&
-            item['value']?.toString().trim() == originalTitle;
-      });
-      if (!exists) {
-        information.add({'label': 'Alternative Name', 'value': originalTitle});
-      }
-    } else {
-      data['information'] = [
-        {'label': 'Alternative Name', 'value': originalTitle}
-      ];
-    }
-  }
-
-  Future<void> _loadMalDetail(int malId, {
+  Future<void> _loadMangaDexDetail(
+    String mangaDexId, {
     Map<String, dynamic>? preCrawledData,
-    bool malAlternativeUsed = false,
     String? originalTitle,
   }) async {
     print(
-      '[CrawlScreen][_loadMalDetail] bat dau malId=$malId pendingUrl=$_crawlUrlPending',
+      '[CrawlScreen][_loadMangaDexDetail] bat dau mangaDexId=$mangaDexId pendingUrl=$_crawlUrlPending',
     );
     setState(() {
-      malLoading = true;
-      malInfo = null;
+      _metaProvider = MetadataProvider.mangaDex;
     });
     try {
-      final detail = await crawlService.getMalDetail(malId);
+      final detail = await crawlService.getMangaDexDetail(mangaDexId);
       if (!mounted) return;
 
       print(
-        '[CrawlScreen][_loadMalDetail] detail nhan duoc malId=${detail['malId']} title=${detail['title']} keys=${detail.keys.toList()}',
+        '[CrawlScreen][_loadMangaDexDetail] detail nhan duoc mangaDexId=${detail['mangaDexId']} title=${detail['title']} keys=${detail.keys.toList()}',
       );
-      setState(() {
-        malInfo = Map<String, dynamic>.from(detail);
-      });
 
       final pendingUrl = _crawlUrlPending;
-      print(
-        '[CrawlScreen][_loadMalDetail] pendingUrl=$pendingUrl malInfo null=${malInfo == null}',
-      );
+      print('[CrawlScreen][_loadMangaDexDetail] pendingUrl=$pendingUrl');
       if (pendingUrl != null && mounted) {
         _crawlUrlPending = null;
-        await _fetchChapters(pendingUrl,
-            malInfo: malInfo,
-            preCrawledData: preCrawledData,
-            malAlternativeUsed: malAlternativeUsed,
-            originalTitle: originalTitle);
+        await _fetchChapters(
+          pendingUrl,
+          mangaDexInfo: detail,
+          mangaDexId: mangaDexId,
+          preCrawledData: preCrawledData,
+          originalTitle: originalTitle,
+        );
       }
     } catch (e) {
       if (!mounted) return;
-      print('[CrawlScreen][_loadMalDetail] Loi lay chi tiet MAL: $e');
-      _showSnackBar('Loi lay chi tiet MAL: $e');
+      print('[CrawlScreen][_loadMangaDexDetail] Loi lay chi tiet MangaDex: $e');
+      _showSnackBar('Loi lay chi tiet MangaDex: $e');
       final pendingUrl = _crawlUrlPending;
       if (pendingUrl != null && mounted) {
         _crawlUrlPending = null;
-        await _fetchChapters(pendingUrl,
-            malInfo: null,
-            preCrawledData: preCrawledData,
-            malAlternativeUsed: malAlternativeUsed,
-            originalTitle: originalTitle);
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          malLoading = false;
-        });
+        await _fetchChapters(
+          pendingUrl,
+          mangaDexInfo: null,
+          mangaDexId: null,
+          preCrawledData: preCrawledData,
+          originalTitle: originalTitle,
+        );
       }
     }
   }
+
   void backToSearch() {
     setState(() {
       data = null;
@@ -794,14 +709,10 @@ class _CrawlScreenState extends State<CrawlScreen> {
       _createNewStory = true;
       chapterRangeController.clear();
 
-      malInfo = null;
-      malStatus = null;
-      malCandidates = [];
-      showMalCandidates = false;
       _crawlUrlPending = null;
-      malLoading = false;
       _crawlOriginalTitle = null;
       _crawlUsedAlternative = false;
+      _metaProvider = null;
     });
   }
 
@@ -857,28 +768,34 @@ class _CrawlScreenState extends State<CrawlScreen> {
     try {
       final payload = Map<String, dynamic>.from(data!);
 
-      if (malInfo != null) {
-        // Giữ nguyên object MAL gốc để backend có đầy đủ dữ liệu.
-        final completeMalInfo = Map<String, dynamic>.from(malInfo!);
+      // MangaDex co uu tien cao nhat.
+      if (payload['mangaDexInfo'] != null && payload['mangaDexInfo'] is Map) {
+        final completeMdInfo = Map<String, dynamic>.from(
+          payload['mangaDexInfo'] as Map,
+        );
 
-        payload['malInfo'] = completeMalInfo;
-        payload['malId'] = completeMalInfo['malId'] ?? data!['malId'];
+        payload['mangaDexInfo'] = completeMdInfo;
+        payload['mangaDexId'] =
+            completeMdInfo['mangaDexId'] ??
+            completeMdInfo['id'] ??
+            payload['mangaDexId'];
 
-        // Khi có MAL, CHỈ dùng thông tin của MAL, không gộp với website.
-        payload['title'] = _malString(completeMalInfo['title']);
+        // Khi co MangaDex, CHI dung thong tin cua MangaDex, khong gop voi website.
+        payload['title'] =
+            completeMdInfo['title']?.toString() ?? completeMdInfo['title'];
 
-        final malCover = _malString(completeMalInfo['cover']);
-        payload['cover'] = malCover;
-        payload['coverUrl'] = malCover;
+        // Giu nguyen cover tu source crawler, khong ghi de boi cover MangaDex.
 
-        payload['description'] = _malString(completeMalInfo['synopsis']);
+        payload['description'] =
+            completeMdInfo['synopsis']?.toString() ??
+            completeMdInfo['synopsis'];
 
-        // API MAL hiện tại trả authors ở cấp cao nhất.
-        payload['author'] = _malString(completeMalInfo['authors']);
+        payload['author'] =
+            completeMdInfo['authors']?.toString() ?? completeMdInfo['authors'];
 
-        // Không thêm các field MAL vào payload['information'].
-        // MAL đã được lưu đầy đủ trong payload['malInfo'].
-        // information chỉ giữ lại thông tin do website crawler trả về.
+        // Khong them field MangaDex vao payload['information'].
+        // MangaDex da duoc luu day du trong payload['mangaDexInfo'].
+        // information chi giu lai thong tin do website crawler tra ve.
       }
 
       payload['chapters'] = selectedChapters;
@@ -1259,7 +1176,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
     final chapterList = chapters;
 
     print(
-      '[CrawlScreen][build] data null=${data == null} malCandidates=${malCandidates.length} showMalCandidates=$showMalCandidates malInfo null=${malInfo == null} loading=$loading searching=$searching',
+      '[CrawlScreen][build] data null=${data == null} loading=$loading searching=$searching',
     );
 
     return Scaffold(
@@ -1327,12 +1244,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
                         _selectedStoryId = null;
                         _createNewStory = true;
                         chapterRangeController.clear();
-
-                        malInfo = null;
-                        malStatus = null;
-                        malCandidates = [];
-                        showMalCandidates = false;
-      _crawlUrlPending = null;
                         _crawlUrlPending = null;
                       });
                     },
@@ -1370,7 +1281,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
               child: ListView(
                 padding: const EdgeInsets.only(bottom: 90),
                 children: [
-                  if (showMalCandidates) _buildMalCandidates(),
                   _buildStoryHeader(),
                   _buildMalInfo(),
                   _buildInformation(),
@@ -1385,152 +1295,50 @@ class _CrawlScreenState extends State<CrawlScreen> {
     );
   }
 
-  // =========================================================
-
-  // MAL INFO
-  // =========================================================
-
-  Widget _buildMalCandidates() {
-    if (!showMalCandidates || malCandidates.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Row(
-                children: [
-                  Icon(Icons.search, color: Colors.amber),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Chọn lại truyện trên MyAnimeList',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 220,
-                child: ListView.separated(
-                  itemCount: malCandidates.length,
-                  separatorBuilder: (_, __) {
-                    return const Divider(height: 1);
-                  },
-                  itemBuilder: (context, index) {
-                    final candidate = malCandidates[index];
-
-                    final title = candidate['title']?.toString() ?? '';
-                    final cover = candidate['cover']?.toString() ?? '';
-                    final malId = candidate['malId']?.toString() ?? '';
-                    final type = candidate['type']?.toString() ?? '';
-
-                    final isSelected =
-                        malInfo != null &&
-                        malInfo!['malId']?.toString() == malId;
-
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                      leading: ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: cover.isNotEmpty
-                            ? Image.network(
-                                cover,
-                                width: 40,
-                                height: 55,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) {
-                                  return _malCandidatePlaceholder();
-                                },
-                              )
-                            : _malCandidatePlaceholder(),
-                      ),
-                      title: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontWeight: isSelected
-                              ? FontWeight.bold
-                              : FontWeight.w600,
-                        ),
-                      ),
-                      subtitle: Text(
-                        'MAL ID: $malId  •  Loại: $type',
-                        style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                      ),
-                      selected: isSelected,
-                      selectedTileColor: Colors.blue.withValues(alpha: 0.1),
-                      onTap: importing || malLoading
-                          ? null
-                          : () => _selectMalCandidate(candidate),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _selectMalCandidate(Map<String, dynamic> candidate) async {
-    final malId = _readStoryId(candidate['malId']);
-    print(
-      '[CrawlScreen][_selectMalCandidate] candidate malId=$malId title=${candidate['title']}',
-    );
-    if (malId == null) return;
-    setState(() {
-      showMalCandidates = false;
-    });
-    await _loadMalDetail(malId);
-  }
-
-  Widget _malCandidatePlaceholder() {
+  Widget _malCoverPlaceholder() {
     return Container(
-      width: 40,
-      height: 55,
+      width: 90,
+      height: 130,
       color: Colors.grey[300],
       child: const Icon(
         Icons.image_not_supported,
-        size: 14,
+        size: 30,
         color: Colors.grey,
       ),
     );
   }
 
   Widget _buildMalInfo() {
-    if (malInfo == null) {
-      if (malLoading) {
-        return const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Center(child: CircularProgressIndicator()),
-        );
-      }
-
+    final mangaDexInfo = data?['mangaDexInfo'];
+    if (mangaDexInfo == null) {
       return const SizedBox.shrink();
     }
 
-    final title = _malString(malInfo!['title']);
-    final englishTitle = _malString(malInfo!['englishTitle']);
-    final japaneseTitle = _malString(malInfo!['japaneseTitle']);
-    final authors = _malString(malInfo!['authors']);
-    final type = _malString(malInfo!['type']);
-    final status = _malString(malInfo!['status']);
-    final cover = _malString(malInfo!['cover']);
-    final score = _malString(malInfo!['score']);
-    final genres = _malStringList(malInfo!['genres']);
-    final crawlOriginalTitle = _crawlUsedAlternative ? _crawlOriginalTitle : null;
+    final title = mangaDexInfo['title']?.toString() ?? '';
+    final japaneseTitle = mangaDexInfo['japaneseTitle']?.toString() ?? '';
+    final authors = mangaDexInfo['authors']?.toString() ?? '';
+    final type = mangaDexInfo['type']?.toString() ?? '';
+    final status = mangaDexInfo['status']?.toString() ?? '';
+    final cover = data?['cover']?.toString() ??
+        mangaDexInfo['cover']?.toString() ?? '';
+    final isMangaDexCover = cover.contains('mangadex.org');
+    print(
+      '[CrawlScreen][_buildMalInfo] cover value="$cover" isMangaDex=$isMangaDexCover',
+    );
+    final score = mangaDexInfo['score']?.toString() ?? '';
+    final genresRaw = mangaDexInfo['genres'];
+    final genres = genresRaw is List
+        ? genresRaw.whereType<String>().toList()
+        : (genresRaw?.toString() ?? '')
+              .split(',')
+              .where((s) => s.isNotEmpty)
+              .toList();
+    final crawlOriginalTitle = _crawlUsedAlternative
+        ? _crawlOriginalTitle
+        : null;
+    final mangaDexId = mangaDexInfo['mangaDexId']?.toString() ?? '';
+    final allTitlesRaw = mangaDexInfo['allTitles'];
+    final allTitlesByLocale = _parseAllTitlesByLocale(allTitlesRaw);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -1545,19 +1353,10 @@ class _CrawlScreenState extends State<CrawlScreen> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: cover.isNotEmpty
-                        ? Image.network(
-                            cover,
-                            width: 90,
-                            height: 130,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) {
-                              return _malCoverPlaceholder();
-                            },
-                          )
-                        : _malCoverPlaceholder(),
+                  _StoryCoverWidget(
+                    coverUrl: cover,
+                    isMangaDex: isMangaDexCover,
+                    storyUrl: mangaDexInfo['url']?.toString() ?? '',
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -1575,8 +1374,8 @@ class _CrawlScreenState extends State<CrawlScreen> {
                                 color: Colors.blue.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(6),
                               ),
-                              child: const Text(
-                                'MyAnimeList',
+                              child: Text(
+                                'MangaDex',
                                 style: TextStyle(
                                   color: Colors.blue,
                                   fontSize: 11,
@@ -1585,22 +1384,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
                               ),
                             ),
                             const Spacer(),
-                            if (malCandidates.length > 1)
-                              IconButton(
-                                icon: const Icon(
-                                  Icons.refresh,
-                                  color: Colors.amber,
-                                  size: 18,
-                                ),
-                                tooltip: 'Đổi truyện MyAnimeList',
-                                onPressed: importing || malLoading
-                                    ? null
-                                    : () {
-                                        setState(() {
-                                          showMalCandidates = true;
-                                        });
-                                      },
-                              ),
                             if (score.isNotEmpty)
                               Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -1624,22 +1407,14 @@ class _CrawlScreenState extends State<CrawlScreen> {
                         const SizedBox(height: 10),
                         Text(
                           title.isEmpty ? 'Chưa có tiêu đề' : title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 17,
                             fontWeight: FontWeight.bold,
                             height: 1.25,
                           ),
                         ),
-                        if (englishTitle.isNotEmpty) ...[
-                          const SizedBox(height: 6),
-                          Text(
-                            englishTitle,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey[700],
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                   ),
@@ -1657,7 +1432,8 @@ class _CrawlScreenState extends State<CrawlScreen> {
               ],
 
               // TruyenGGVN ten goc (luu thanh Alternative Name).
-              if (crawlOriginalTitle != null && crawlOriginalTitle.isNotEmpty) ...[
+              if (crawlOriginalTitle != null &&
+                  crawlOriginalTitle.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 _buildMalMetadataRow(
                   icon: Icons.title_outlined,
@@ -1733,35 +1509,67 @@ class _CrawlScreenState extends State<CrawlScreen> {
                 ),
               ],
 
-              // MAL ID and URL.
-              if (malInfo!['malId'] != null ||
-                  _malString(malInfo!['url']).isNotEmpty) ...[
+              // Provider ID and URL.
+              if (mangaDexId.isNotEmpty ||
+                  mangaDexInfo['url']?.toString().isNotEmpty == true) ...[
                 const SizedBox(height: 14),
                 const Divider(height: 1),
                 const SizedBox(height: 10),
                 Row(
                   children: [
-                    if (malInfo!['malId'] != null)
-                      Text(
-                        'MAL ID: ${malInfo!['malId']}',
-                        style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                    if (mangaDexId.isNotEmpty)
+                      Expanded(
+                        child: Text(
+                          'MangaDex ID: $mangaDexId',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[600],
+                          ),
+                        ),
                       ),
                     const Spacer(),
-                    if (_malString(malInfo!['url']).isNotEmpty)
+                    if (mangaDexInfo['url']?.toString().isNotEmpty == true)
                       TextButton.icon(
                         onPressed: () {
-                          final url = _malString(malInfo!['url']);
+                          final url = mangaDexInfo['url']?.toString() ?? '';
 
-                          _showSnackBar('MAL URL: $url');
+                          _showSnackBar('MangaDex URL: $url');
                         },
                         icon: const Icon(Icons.link, size: 15),
-                        label: const Text('MAL'),
+                        label: Text('MangaDex'),
                         style: TextButton.styleFrom(
                           visualDensity: VisualDensity.compact,
                         ),
                       ),
                   ],
                 ),
+              ],
+
+              // All title variants grouped by locale, hien thi label: value.
+              if (allTitlesByLocale.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                _buildMalSectionTitle(icon: Icons.title, title: 'Tất cả tên'),
+                const SizedBox(height: 8),
+                ...allTitlesByLocale.entries.expand((entry) {
+                  final locale = entry.key;
+                  final titles = entry.value;
+                  final label = _localeLabel(locale);
+                  return <Widget>[
+                    ...titles.map(
+                      (t) => Padding(
+                        padding: const EdgeInsets.only(left: 4, bottom: 2),
+                        child: _buildMalMetadataRow(
+                          icon: Icons.title,
+                          label: label,
+                          value: t,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                  ];
+                }),
               ],
             ],
           ),
@@ -1770,27 +1578,13 @@ class _CrawlScreenState extends State<CrawlScreen> {
     );
   }
 
-  Widget _malCoverPlaceholder() {
-    return Container(
-      width: 90,
-      height: 130,
-      color: Colors.grey[300],
-      child: const Icon(
-        Icons.image_not_supported,
-        color: Colors.grey,
-        size: 30,
-      ),
-    );
-  }
-
   // =========================================================
   // STORY HEADER (WEBSITE FALLBACK)
   // =========================================================
 
-  /// Hiển thị tiêu đề và bìa từ website khi không có MAL.
-  /// Khi có MAL, _buildMalInfo() đã hiển thị thông tin MAL, không hiển thị thêm đây.
+  /// Hiển thị tiêu đề và bìa từ website khi không có MangaDex.
   Widget _buildStoryHeader() {
-    if (malInfo != null) return const SizedBox.shrink();
+    if (data?['mangaDexInfo'] != null) return const SizedBox.shrink();
 
     final title = data?['title']?.toString().trim() ?? '';
     final coverFromData = data?['cover']?.toString().trim() ?? '';
@@ -1839,24 +1633,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
                   ),
                 ],
               ),
-              if (malStatus == 'NOT_FOUND') ...[
-                const SizedBox(height: 6),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.block, color: Colors.grey[500], size: 14),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Không có trên MyAnimeList',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[600],
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
             ],
           ),
         ),
@@ -2004,8 +1780,8 @@ class _CrawlScreenState extends State<CrawlScreen> {
   }
 
   Widget _buildInformation() {
-    // Khi đã có MAL, không hiển thị thêm thông tin từ website source.
-    if (malInfo != null) {
+    // Khi đã có MangaDex, không hiển thị thêm thông tin từ website source.
+    if (data?['mangaDexInfo'] != null) {
       return const SizedBox.shrink();
     }
 
@@ -2044,7 +1820,8 @@ class _CrawlScreenState extends State<CrawlScreen> {
     }
 
     // TruyenGGVN dùng "Đang Cập Nhật" làm placeholder cho tác giả → bỏ qua.
-    final showAuthors = authors != null &&
+    final showAuthors =
+        authors != null &&
         authors.isNotEmpty &&
         authors.toLowerCase() != 'đang cập nhật';
 
@@ -2053,10 +1830,12 @@ class _CrawlScreenState extends State<CrawlScreen> {
 
     // Các field đã được đưa ra ngoài (genre, author) thì không còn hiển thị trong dropdown.
     final remainingKeys = infoMap.keys
-        .where((k) =>
-            !skippedLabels.contains(k) &&
-            k != 'Genres' &&
-            !k.toLowerCase().contains('author'))
+        .where(
+          (k) =>
+              !skippedLabels.contains(k) &&
+              k != 'Genres' &&
+              !k.toLowerCase().contains('author'),
+        )
         .toList();
 
     if ((genres == null || genres.isEmpty) &&
@@ -2085,75 +1864,72 @@ class _CrawlScreenState extends State<CrawlScreen> {
                 Wrap(
                   spacing: 7,
                   runSpacing: 7,
-                  children: genres
-                      .split(RegExp(r'[,;，；]'))
-                      .map((g) {
+                  children: genres.split(RegExp(r'[,;，；]')).map((g) {
                     final trimmed = g.trim();
                     if (trimmed.isEmpty) return const SizedBox.shrink();
                     return Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .secondaryContainer,
+                        color: Theme.of(context).colorScheme.secondaryContainer,
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
                         trimmed,
                         style: TextStyle(
                           fontSize: 12,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSecondaryContainer,
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSecondaryContainer,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
                     );
-                  })
-                      .toList(),
+                  }).toList(),
                 ),
               ],
 
-        // Tác giả (bỏ qua nếu là "Đang Cập Nhật").
-        if (showAuthors) ...[
-          const SizedBox(height: 16),
-          _buildMalSectionTitle(
-            icon: Icons.info_outline,
-            title: 'Thông tin từ website',
-          ),
-          const SizedBox(height: 10),
-          _buildMalMetadataRow(
-            icon: Icons.person_outline,
-            label: 'Tác giả',
-            value: authors!,
-          ),
-        ],
+              // Tác giả (bỏ qua nếu là "Đang Cập Nhật").
+              if (showAuthors) ...[
+                const SizedBox(height: 16),
+                _buildMalSectionTitle(
+                  icon: Icons.info_outline,
+                  title: 'Thông tin từ website',
+                ),
+                const SizedBox(height: 10),
+                _buildMalMetadataRow(
+                  icon: Icons.person_outline,
+                  label: 'Tác giả',
+                  value: authors!,
+                ),
+              ],
 
-        // Các field còn lại giữ trong dropdown.
-        if (remainingKeys.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Card(
-            elevation: 0,
-            child: ExpansionTile(
-              initiallyExpanded: false,
-              title: Text(
-                'Thông tin từ website (${remainingKeys.length})',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                  child: Column(
-                    children: remainingKeys.map<Widget>((label) {
-                      return _buildInfoRow(label, infoMap[label]!);
-                    }).toList(),
+              // Các field còn lại giữ trong dropdown.
+              if (remainingKeys.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Card(
+                  elevation: 0,
+                  child: ExpansionTile(
+                    initiallyExpanded: false,
+                    title: Text(
+                      'Thông tin từ website (${remainingKeys.length})',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                        child: Column(
+                          children: remainingKeys.map<Widget>((label) {
+                            return _buildInfoRow(label, infoMap[label]!);
+                          }).toList(),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
-            ),
-          ),
-        ],
             ],
           ),
         ),
@@ -2268,6 +2044,290 @@ class _CrawlScreenState extends State<CrawlScreen> {
                 },
         );
       }),
+    );
+  }
+}
+
+// =============================================================
+// MANGADEX IMAGE CACHE + RATE LIMIT GUARD
+// =============================================================
+
+/// Chặn request lặp lại khi MangaDex trả HTTP 429.
+/// Cache thành công do CachedNetworkImage quản lý; cooldown này chỉ quản lý lỗi.
+class _MangaDexCachedImage extends StatefulWidget {
+  final String imageUrl;
+  final double width;
+  final double height;
+  final BoxFit fit;
+
+  const _MangaDexCachedImage({
+    super.key,
+    required this.imageUrl,
+    required this.width,
+    required this.height,
+    this.fit = BoxFit.cover,
+  });
+
+  @override
+  State<_MangaDexCachedImage> createState() => _MangaDexCachedImageState();
+}
+
+class _MangaDexCachedImageState extends State<_MangaDexCachedImage> {
+  // MangaDex rate limit thường áp dụng theo host/IP, không chỉ từng URL.
+  static final Map<String, DateTime> _hostBlockedUntil = {};
+
+  // Lỗi mạng thông thường chỉ cooldown riêng URL để không ảnh hưởng ảnh khác.
+  static final Map<String, DateTime> _urlFailedUntil = {};
+
+  static const Duration _rateLimitCooldown = Duration(minutes: 10);
+  static const Duration _networkErrorCooldown = Duration(minutes: 2);
+
+  int _retryCount = 0;
+  static const int _maxRetries = 3;
+  late Key _imageKey;
+
+  @override
+  void initState() {
+    super.initState();
+    _imageKey = ValueKey('${widget.imageUrl}_$_retryCount');
+  }
+
+  String get _host {
+    return Uri.tryParse(widget.imageUrl)?.host.toLowerCase() ?? '';
+  }
+
+  bool get _isCoolingDown {
+    final now = DateTime.now();
+    final hostUntil = _hostBlockedUntil[_host];
+    final urlUntil = _urlFailedUntil[widget.imageUrl];
+
+    if (hostUntil != null && now.isBefore(hostUntil)) return true;
+    if (urlUntil != null && now.isBefore(urlUntil)) return true;
+
+    if (hostUntil != null && !now.isBefore(hostUntil)) {
+      _hostBlockedUntil.remove(_host);
+    }
+    if (urlUntil != null && !now.isBefore(urlUntil)) {
+      _urlFailedUntil.remove(widget.imageUrl);
+    }
+
+    return false;
+  }
+
+  void _handleImageError(Object error) {
+    final message = error.toString().toLowerCase();
+    final isNetworkError =
+        message.contains('socket') ||
+        message.contains('connection') ||
+        message.contains('reset') ||
+        message.contains('timeout');
+    final isRateLimited =
+        message.contains('429') || message.contains('too many requests');
+
+    final now = DateTime.now();
+
+    if (isRateLimited) {
+      final current = _hostBlockedUntil[_host];
+      if (current == null || !now.isBefore(current)) {
+        _hostBlockedUntil[_host] = now.add(_rateLimitCooldown);
+        debugPrint(
+          '[MangaDexImage] HTTP 429: block host=$_host '
+          'for ${_rateLimitCooldown.inMinutes} minutes',
+        );
+      }
+    } else if (isNetworkError && _retryCount < _maxRetries) {
+      _retryCount++;
+      debugPrint(
+        '[MangaDexImage] Retry $_retryCount/$_maxRetries after network error: '
+        '${widget.imageUrl}; error=$error',
+      );
+      Future.delayed(Duration(seconds: _retryCount * 2), () {
+        if (!mounted) return;
+        setState(() {
+          _imageKey = ValueKey('${widget.imageUrl}_$_retryCount');
+        });
+      });
+    } else {
+      final current = _urlFailedUntil[widget.imageUrl];
+      if (current == null || !now.isBefore(current)) {
+        _urlFailedUntil[widget.imageUrl] = now.add(_networkErrorCooldown);
+        debugPrint(
+          '[MangaDexImage] Image failed; cooldown URL for '
+          '${_networkErrorCooldown.inMinutes} minutes: ${widget.imageUrl}; '
+          'error=$error',
+        );
+      }
+    }
+  }
+
+  Widget _placeholder() {
+    return Container(
+      width: widget.width,
+      height: widget.height,
+      color: Colors.grey[300],
+      alignment: Alignment.center,
+      child: const Icon(
+        Icons.image_not_supported,
+        color: Colors.grey,
+        size: 24,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.imageUrl.isEmpty || _isCoolingDown) {
+      return _placeholder();
+    }
+
+    return CachedNetworkImage(
+      key: _imageKey,
+      imageUrl: widget.imageUrl,
+      cacheKey: widget.imageUrl,
+      width: widget.width,
+      height: widget.height,
+      fit: widget.fit,
+      fadeInDuration: Duration.zero,
+      fadeOutDuration: Duration.zero,
+      placeholder: (_, __) => _placeholder(),
+      errorWidget: (_, __, error) {
+        _handleImageError(error);
+        return _placeholder();
+      },
+    );
+  }
+}
+
+// =============================================================
+// STORY COVER WIDGET
+// =============================================================
+
+class _StoryCoverWidget extends StatefulWidget {
+  final String coverUrl;
+  final bool isMangaDex;
+  final String storyUrl;
+
+  _StoryCoverWidget({
+    required this.coverUrl,
+    required this.isMangaDex,
+    required this.storyUrl,
+  }) : super(key: ValueKey(coverUrl));
+
+  @override
+  State<_StoryCoverWidget> createState() => _StoryCoverWidgetState();
+}
+
+class _StoryCoverWidgetState extends State<_StoryCoverWidget> {
+  String _coverUrl = ''; // bắt đầu rỗng → hiển thị placeholder, load chậm sau
+  bool _coverLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    debugPrint(
+      '[CrawlScreen][_StoryCoverWidget] initState coverUrl=${widget.coverUrl}',
+    );
+    // Đợi render xong nội dung khác mới load cover (tránh rate limit MangaDex)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (!mounted) return;
+        setState(() {
+          _coverUrl = widget.coverUrl;
+          _coverLoaded = true;
+        });
+      });
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _StoryCoverWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    debugPrint(
+      '[CrawlScreen][_StoryCoverWidget] didUpdateWidget '
+      'old=${oldWidget.coverUrl} new=${widget.coverUrl}',
+    );
+    // Nếu coverUrl thay đổi (user chọn truyện khác), reset để load lại sau delay
+    if (oldWidget.coverUrl != widget.coverUrl && _coverLoaded) {
+      setState(() {
+        _coverUrl = '';
+        _coverLoaded = false;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (!mounted) return;
+          setState(() {
+            _coverUrl = widget.coverUrl;
+            _coverLoaded = true;
+          });
+        });
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final displayUrl = _coverUrl;
+    if (displayUrl.isEmpty) {
+      return _placeholder();
+    }
+
+    if (widget.isMangaDex) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: _MangaDexCachedImage(
+          imageUrl: displayUrl,
+          width: 90,
+          height: 130,
+        ),
+      );
+    }
+
+    final coverUri = Uri.tryParse(displayUrl);
+    final referer = coverUri != null && coverUri.host.isNotEmpty
+        ? '${coverUri.scheme}://${coverUri.authority}/'
+        : 'https://www.mangahere.com/';
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: CachedNetworkImage(
+        imageUrl: displayUrl,
+        cacheKey: displayUrl,
+        httpHeaders: {
+          'Referer': referer,
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+              'AppleWebKit/537.36 (KHTML, like Gecko) '
+              'Chrome/146.0.0.0 Safari/537.36',
+        },
+        width: 90,
+        height: 130,
+        fit: BoxFit.cover,
+        fadeInDuration: Duration.zero,
+        placeholder: (_, __) => _placeholder(),
+        errorWidget: (_, __, error) {
+          debugPrint(
+            '[CrawlScreen][_StoryCoverWidget] ERROR '
+            'url=$displayUrl error=$error',
+          );
+          return _placeholder();
+        },
+      ),
+    );
+  }
+
+  Widget _placeholder() {
+    return Container(
+      width: 90,
+      height: 130,
+      color: Colors.grey[300],
+      alignment: Alignment.center,
+      child: const Icon(
+        Icons.image_not_supported,
+        color: Colors.grey,
+        size: 30,
+      ),
     );
   }
 }

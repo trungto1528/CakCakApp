@@ -84,15 +84,15 @@ class CrawlService {
   }
 
   // ============================================================
-  // MYANIMELIST
+  // MANGADEX
   // ============================================================
 
-  Future<Map<String, dynamic>> searchMal(String title) async {
+  Future<Map<String, dynamic>> searchMangaDex(String title) async {
     final trimmed = title.trim();
-    print('[MAL][searchMal] title="$trimmed" url=$_baseUrl/mal/search');
+    print('[MangaDex][searchMangaDex] title="$trimmed" url=$_baseUrl/mangadex/search');
 
     final res = await http.post(
-      Uri.parse('$_baseUrl/mal/search'),
+      Uri.parse('$_baseUrl/mangadex/search'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'title': trimmed}),
     );
@@ -100,39 +100,33 @@ class CrawlService {
     final bodyPreview = res.body.length > 500
         ? '${res.body.substring(0, 500)}...'
         : res.body;
-    print('[MAL][searchMal] statusCode=${res.statusCode} body=$bodyPreview');
+    print('[MangaDex][searchMangaDex] statusCode=${res.statusCode} body=$bodyPreview');
 
     if (res.statusCode == 200) {
-      final decoded = _decodeMap(
+      return _decodeMap(
         res.body,
-        errorMessage: 'Dữ liệu tìm kiếm MAL không hợp lệ',
+        errorMessage: 'Dữ liệu tìm kiếm MangaDex không hợp lệ',
       );
-      final status = decoded['status']?.toString() ?? '';
-      final malId = decoded['malId']?.toString() ?? '';
-      final resultsCount = (decoded['results'] as List?)?.length ?? 0;
-      print(
-        '[MAL][searchMal] parsed status=$status malId=$malId resultsCount=$resultsCount',
-      );
-      return decoded;
     }
 
-    throw _httpError('MAL search failed', res);
+    throw _httpError('MangaDex search failed', res);
   }
 
-  Future<Map<String, dynamic>> getMalDetail(int malId) async {
-    print('[MAL][getMalDetail] malId=$malId url=$_baseUrl/mal/detail/$malId');
+  Future<Map<String, dynamic>> getMangaDexDetail(String mangaDexId) async {
+    print(
+        '[MangaDex][getMangaDexDetail] mangaDexId=$mangaDexId url=$_baseUrl/mangadex/detail/$mangaDexId');
     final res = await http.get(
-      Uri.parse('$_baseUrl/mal/detail/$malId'),
+      Uri.parse('$_baseUrl/mangadex/detail/$mangaDexId'),
     );
 
     if (res.statusCode == 200) {
       return _decodeMap(
         res.body,
-        errorMessage: 'Dữ liệu chi tiết MAL không hợp lệ',
+        errorMessage: 'Dữ liệu chi tiết MangaDex không hợp lệ',
       );
     }
 
-    throw _httpError('MAL detail failed', res);
+    throw _httpError('MangaDex detail failed', res);
   }
 
   // ============================================================

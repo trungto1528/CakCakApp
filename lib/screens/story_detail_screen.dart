@@ -558,8 +558,25 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
         ),
       );
     }
+    final coverUrl = story['coverUrl'] ?? '';
+    final isExternal = coverUrl.startsWith('http');
+    final imageUrl = isExternal ? coverUrl : '${ApiConfig.coverImage}/$coverUrl';
+    if (isExternal) {
+      return Image.network(
+        imageUrl,
+        headers: {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'},
+        height: 180,
+        width: 120,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => const SizedBox(
+          width: 120,
+          height: 180,
+          child: Icon(Icons.book, size: 48),
+        ),
+      );
+    }
     return CachedNetworkImage(
-      imageUrl: '${ApiConfig.coverImage}/${story['coverUrl'] ?? ''}',
+      imageUrl: imageUrl,
       height: 180,
       width: 120,
       fit: BoxFit.cover,
@@ -711,15 +728,52 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     final synonyms = _infoValue('Synonyms');
     final englishTitle = _infoValue('English Title');
     final japaneseTitle = _infoValue('Japanese Title');
-    // "Các tên khác" chỉ gồm Synonyms, English Title, Japanese Title;
-    // mỗi tên hiển thị riêng một dòng, giữ nguyên giá trị (không tách dấu phẩy).
+    // "Các tên khác" gồm Synonyms, English Title, Japanese Title và các locale title
+    // khác từ MangaDex (ví dụ Title (ja-ro), Title (id), ...).
     final altNameEntries = <MapEntry<String, String>>[
       if (synonyms.isNotEmpty) MapEntry('Synonyms', synonyms),
       if (englishTitle.isNotEmpty) MapEntry('English Title', englishTitle),
       if (japaneseTitle.isNotEmpty) MapEntry('Japanese Title', japaneseTitle),
     ];
-
-    final isMal = source == 'MyAnimeList' || malId.isNotEmpty;
+    // Thêm các locale title từ MangaDex (label: "MangaDex: Title ({locale})").
+    final infoList = story['information'] is List
+        ? story['information'] as List
+        : <dynamic>[];
+    for (final item in infoList) {
+      if (item is! Map) continue;
+      final label = item['label']?.toString() ?? '';
+      final value = item['value']?.toString() ?? '';
+      if (label.startsWith('MangaDex: Title (') && label.endsWith(')') && value.isNotEmpty) {
+        final locale = label.substring('MangaDex: Title ('.length, label.length - 1);
+        altNameEntries.add(MapEntry('Tên ($locale)', value));
+      }
+      // Fallback: parse JSON từ "MangaDex: allTitles" (dùng trong import flow).
+      if (label == 'MangaDex: allTitles' && value.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(value);
+          if (decoded is Map) {
+            decoded.forEach((k, v) {
+              final locale = k.toString();
+              final val = v.toString();
+              if (val.isNotEmpty &&
+                  locale != 'vi' &&
+                  locale != 'en' &&
+                  locale != 'ja') {
+                altNameEntries.add(MapEntry('Tên ($locale)', val));
+              }
+            });
+          }
+        } catch (_) {}
+      }
+    }
+    final hasMangaDexLink = infoList.any((item) {
+      return item is Map &&
+          (item['label']?.toString() ?? '').startsWith('MangaDex:');
+    });
+    final providerLabel = hasMangaDexLink
+        ? 'MangaDex'
+        : (source.isNotEmpty ? source : '');
+    final isMetadataProvider = providerLabel.isNotEmpty || malId.isNotEmpty;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
@@ -732,27 +786,27 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
             children: [
               Row(
                 mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (isMal)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Text(
-                        'MyAnimeList',
-                        style: TextStyle(
-                          color: Colors.blue,
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
+                  children: [
+                    if (isMetadataProvider)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          providerLabel,
+                          style: TextStyle(
+                            color: Colors.blue,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
-                    ),
-                  if (source.isNotEmpty && !isMal)
+                  if (source.isNotEmpty && false)
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 8,
@@ -885,30 +939,39 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                   Row(
                     children: [
                       if (malId.isNotEmpty)
-                        Text(
-                          'MAL ID: $malId',
-                          style: TextStyle(
-                              fontSize: 11, color: Colors.grey[600]),
+                        Flexible(
+                          child: Text(
+                            '${providerLabel.isNotEmpty ? providerLabel : 'ID'}: $malId',
+                            style: TextStyle(
+                                fontSize: 11, color: Colors.grey[600]),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       const Spacer(),
                       if (malUrl.isNotEmpty)
-                        TextButton.icon(
-                          onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                  content: Text('MAL URL: $malUrl')));
-                          },
-                          icon: const Icon(Icons.link, size: 15),
-                          label: const Text('MAL'),
-                          style: TextButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
+                        Flexible(
+                          child: TextButton.icon(
+                            onPressed: () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                      content: Text('${providerLabel} URL: $malUrl')));
+                            },
+                            icon: const Icon(Icons.link, size: 15),
+                            label: Text(providerLabel.isNotEmpty ? providerLabel : 'Mã',
+                                overflow: TextOverflow.ellipsis),
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                            ),
                           ),
                         ),
                       if (source.isNotEmpty && malId.isEmpty)
-                        Text(
-                          'Nguồn: $source',
-                          style: TextStyle(
-                              fontSize: 11, color: Colors.grey[600]),
+                        Flexible(
+                          child: Text(
+                            'Nguồn: $source',
+                            style: TextStyle(
+                                fontSize: 11, color: Colors.grey[600]),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                     ],
                   ),
