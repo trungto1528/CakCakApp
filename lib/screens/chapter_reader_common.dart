@@ -16,7 +16,9 @@ import '../models/User.dart';
 import '../offline/service/offline_entry_service.dart';
 import '../offline/service/offline_mode_service.dart';
 import '../services/app_preference.dart';
+import '../services/chapter_cache_manager.dart';
 import '../services/chapter_fetcher.dart';
+import '../services/chapter_image_prefetcher.dart';
 import '../services/story_fetcher.dart';
 import '../widget/sequential_chapter_image.dart';
 
@@ -64,6 +66,9 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
   List<GlobalKey> _imageKeys = [];
 
   final Set<int> _finishedInitialImageIndexes = {};
+
+  // Tăng mỗi khi mở chương mới hoặc rời màn hình để hủy prefetch cũ.
+  int _prefetchGeneration = 0;
 
   bool _isCtrlZooming = false;
 
@@ -164,6 +169,8 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         if (_pageController.hasClients) {
           _pageController.jumpToPage(targetPage);
         }
+
+        _precachePageWindow(targetPage.toInt() + 1);
       } else {
         _jumpToImage(targetPage);
       }
@@ -558,6 +565,8 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       }) async {
     if (!mounted) return;
 
+    final prefetchGeneration = ++_prefetchGeneration;
+
     setState(() {
       loading = true;
     });
@@ -575,6 +584,7 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
 
       final imageIndexByBlockIndex = <int>[];
       final imageBlockIndexes = <int>[];
+      final imageUrls = <String>[];
 
       var imageCount = 0;
 
@@ -585,6 +595,11 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
           imageIndexByBlockIndex.add(imageCount);
           imageBlockIndexes.add(i);
           imageCount++;
+
+          final imageName = block['data']?.toString() ?? '';
+          if (imageName.isNotEmpty) {
+            imageUrls.add('${ApiConfig.chapterImage}/$imageName');
+          }
         } else {
           imageIndexByBlockIndex.add(-1);
         }
@@ -657,30 +672,22 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || currentChapterId != id) return;
 
-        // Preload toàn bộ ảnh ngay sau khi nhận dữ liệu chương.
-        // Việc này đảm bảo ảnh ở các vị trí chưa được ListView/PageView
-        // dựng lên cũng bắt đầu tải, không phải đợi người dùng cuộn tới.
-        if (!useOfflineImages) {
-          for (final block in newBlocks) {
-            if (block is! Map || block['type'] != 'image') {
-              continue;
-            }
+        // Tải trước toàn bộ ảnh của chương vào đúng cache đĩa mà
+        // các widget đọc ảnh đang dùng. Nhờ vậy khi chuyển trang
+        // không phải chờ tải mạng lại.
+        if (!offlineImages && imageUrls.isNotEmpty) {
+          final orderedUrls = openAtLastPage
+              ? imageUrls.reversed.toList(growable: false)
+              : imageUrls;
 
-            final imageName = block['data']?.toString() ?? '';
-            if (imageName.isEmpty) continue;
-
-            final imageUrl = '${ApiConfig.chapterImage}/$imageName';
-
-            precacheImage(
-              CachedNetworkImageProvider(imageUrl),
-              context,
-            ).then<void>(
-                  (_) {},
-              onError: (Object error, StackTrace stackTrace) {
-                debugPrint('Lỗi preload ảnh $imageName: $error');
-              },
-            );
-          }
+          ChapterImagePrefetcher.prefetchChapterImages(
+            orderedUrls,
+            concurrency: 3,
+            isCancelled: () =>
+                !mounted ||
+                currentChapterId != id ||
+                _prefetchGeneration != prefetchGeneration,
+          );
         }
 
         if (scrollController.hasClients) {
@@ -710,6 +717,11 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         if (!openAtLastPage) {
           updateReadingProgress();
         }
+
+        // Giải mã sẵn vài trang quanh trang đang mở vào bộ nhớ.
+        _precachePageWindow(totalPages > 0
+            ? (openAtLastPage ? totalPages : 1)
+            : 1);
       });
 
       await saveReadingHistory(id);
@@ -786,6 +798,43 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
   // ============================================================
   // TIẾN ĐỘ ĐỌC
   // ============================================================
+
+  /// Giải mã sẵn vài trang quanh trang hiện tại vào bộ nhớ để chuyển
+  /// trang tức thì. Chỉ giữ tối đa 5 ảnh (trang hiện tại ±2) nhằm tránh
+  /// tốn RAM.
+  void _precachePageWindow(int centerPage) {
+    if (!mounted || !usePageMode || totalPages == 0) return;
+    if (useOfflineImages) return;
+
+    final int start = math.max(1, centerPage - 2);
+    final int end = math.min(totalPages, centerPage + 2);
+
+    for (int page = start; page <= end; page++) {
+      final int blockIndex = _imageBlockIndexes[page - 1];
+      if (blockIndex < 0 || blockIndex >= blocks.length) continue;
+
+      final block = blocks[blockIndex];
+      if (block is! Map) continue;
+
+      final imageName = block['data']?.toString() ?? '';
+      if (imageName.isEmpty) continue;
+
+      final imageUrl = '${ApiConfig.chapterImage}/$imageName';
+
+      precacheImage(
+        CachedNetworkImageProvider(
+          imageUrl,
+          cacheManager: ChapterCacheManager.instance,
+        ),
+        context,
+      ).then<void>(
+        (_) {},
+        onError: (Object error, StackTrace stackTrace) {
+          debugPrint('Lỗi preload ảnh $imageName: $error');
+        },
+      );
+    }
+  }
 
   void updateReadingProgress() {
     if (usePageMode || totalPages == 0) return;
@@ -868,10 +917,14 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
     setState(() {
       currentPage = newPage;
     });
+
+    _precachePageWindow(newPage);
   }
 
   @override
   void dispose() {
+    _prefetchGeneration++;
+
     scrollController.removeListener(updateReadingProgress);
 
     transformController.removeListener(onTransformChanged);
@@ -1646,7 +1699,7 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
                   ? const NeverScrollableScrollPhysics()
                   : const AlwaysScrollableScrollPhysics(),
               padding: EdgeInsets.zero,
-              cacheExtent: 500,
+              cacheExtent: 1200,
               itemCount: blocks.length,
               itemBuilder: (context, i) {
                 return SizedBox(

@@ -84,6 +84,10 @@ class _SequentialChapterImageState extends State<SequentialChapterImage> {
       width: widget.width,
       fit: BoxFit.fitWidth,
       cacheManager: ChapterCacheManager.instance,
+      // Tránh hiệu ứng nháy/fade khi ảnh được dựng lại từ cache đĩa.
+      fadeInDuration: Duration.zero,
+      fadeOutDuration: Duration.zero,
+      placeholderFadeInDuration: Duration.zero,
       placeholder: (context, url) => _placeholder(),
       imageBuilder: (context, imageProvider) {
         _notifyFinished();

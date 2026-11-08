@@ -1,5 +1,4 @@
 # Changelog
 
-## CrawlScreen + StoryDetailScreen
-- Chuyển sang đi ăn trộm của MangaDex.
-- Hiển thị cả các tên ngôn ngữ khác.
+## ChapterReaderScreen
+- Sửa vấn đề tới trang mới load(chx test đâu, user là nguồn tester vô hạn).
