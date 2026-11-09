@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:novel_app/config/api_config.dart';
 import 'package:novel_app/models/User.dart';
+import 'package:novel_app/models/metadata_provider.dart';
 import 'package:novel_app/offline/service/offline_entry_service.dart';
 import 'package:novel_app/offline/service/offline_mode_service.dart';
 import 'package:novel_app/offline/service/story_download_service.dart';
@@ -735,20 +736,27 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       if (englishTitle.isNotEmpty) MapEntry('English Title', englishTitle),
       if (japaneseTitle.isNotEmpty) MapEntry('Japanese Title', japaneseTitle),
     ];
-    // Thêm các locale title từ MangaDex (label: "MangaDex: Title ({locale})").
+    // Thêm các locale title từ metadata provider (label: "{provider}: Title ({locale})").
     final infoList = story['information'] is List
         ? story['information'] as List
         : <dynamic>[];
+    MetadataProvider? detectedProvider;
     for (final item in infoList) {
       if (item is! Map) continue;
       final label = item['label']?.toString() ?? '';
       final value = item['value']?.toString() ?? '';
-      if (label.startsWith('MangaDex: Title (') && label.endsWith(')') && value.isNotEmpty) {
-        final locale = label.substring('MangaDex: Title ('.length, label.length - 1);
+
+      final titleMarkerIndex = label.indexOf(': Title (');
+      if (titleMarkerIndex > 0 && label.endsWith(')') && value.isNotEmpty) {
+        final locale = label.substring(
+          titleMarkerIndex + ': Title ('.length,
+          label.length - 1,
+        );
         altNameEntries.add(MapEntry('Tên ($locale)', value));
       }
-      // Fallback: parse JSON từ "MangaDex: allTitles" (dùng trong import flow).
-      if (label == 'MangaDex: allTitles' && value.isNotEmpty) {
+
+      // Fallback: parse JSON từ "{provider}: allTitles" (dùng trong import flow).
+      if (label.endsWith(': allTitles') && value.isNotEmpty) {
         try {
           final decoded = jsonDecode(value);
           if (decoded is Map) {
@@ -765,14 +773,21 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
           }
         } catch (_) {}
       }
+
+      if (detectedProvider == null) {
+        for (final provider in MetadataProvider.values) {
+          if (label.startsWith('${provider.label}:')) {
+            detectedProvider = provider;
+            break;
+          }
+        }
+      }
     }
-    final hasMangaDexLink = infoList.any((item) {
-      return item is Map &&
-          (item['label']?.toString() ?? '').startsWith('MangaDex:');
-    });
-    final providerLabel = hasMangaDexLink
-        ? 'MangaDex'
-        : (source.isNotEmpty ? source : '');
+
+    detectedProvider ??= MetadataProviderDisplay.fromValue(source);
+    final providerLabel = detectedProvider?.label ??
+        (source.isNotEmpty ? source : '');
+    final providerColor = detectedProvider?.badgeColor ?? Colors.blue;
     final isMetadataProvider = providerLabel.isNotEmpty || malId.isNotEmpty;
 
     return Padding(
@@ -794,13 +809,13 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                           vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.blue.withValues(alpha: 0.1),
+                          color: providerColor.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
                           providerLabel,
                           style: TextStyle(
-                            color: Colors.blue,
+                            color: providerColor,
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
                           ),

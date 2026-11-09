@@ -38,14 +38,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
 
   Timer? _progressTimer;
 
-  MetadataProvider? _metaProvider;
-
-  String? _crawlUrlPending;
-
-  // TruyenGGVN: ten goc va trang thai dung alternative name de hien thi tren UI.
-  String? _crawlOriginalTitle;
-  bool _crawlUsedAlternative = false;
-
   @override
   void initState() {
     super.initState();
@@ -138,23 +130,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
     if (value is int) return value;
     if (value is num) return value.toInt();
     return int.tryParse(value?.toString() ?? '');
-  }
-
-  List<String> _parseAllTitles(dynamic value) {
-    if (value == null) return const [];
-    if (value is List) {
-      return value.whereType<String>().toList();
-    }
-    if (value is String) {
-      if (value.isEmpty) return const [];
-      try {
-        final decoded = jsonDecode(value);
-        if (decoded is List) {
-          return decoded.whereType<String>().toList();
-        }
-      } catch (_) {}
-    }
-    return const [];
   }
 
   Map<String, List<String>> _parseAllTitlesByLocale(dynamic value) {
@@ -395,7 +370,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
       _selectedStoryId = null;
       _createNewStory = true;
       chapterRangeController.clear();
-      _crawlUrlPending = null;
     });
 
     try {
@@ -448,88 +422,84 @@ class _CrawlScreenState extends State<CrawlScreen> {
       _selectedStoryId = null;
       _createNewStory = true;
       chapterRangeController.clear();
-      _metaProvider = null;
-      _crawlOriginalTitle = null;
-      _crawlUsedAlternative = false;
     });
 
-    _crawlUrlPending = url;
-
     Map<String, dynamic>? preCrawledData;
-    String? alternativeName;
-    bool alternativeUsed = false;
+    List<String> alternativeNames = [];
     String? originalTitle;
 
     try {
-      final title = result['title']?.toString().trim() ?? '';
-      final isTruyenGGVN = selectedWebsite == 'TruyenGGVN';
+      final resultTitle = result['title']?.toString().trim() ?? '';
 
-      // TruyenGGVN: crawl truoc de lay alternative name (ten khac) neu can.
-      if (isTruyenGGVN) {
-        print(
-          '[CrawlScreen][selectSearchResult] TruyenGGVN: crawl lay thong tin truoc url=$url',
-        );
+      // Crawl trước để lấy alternative names và tái sử dụng cho chapters.
+      try {
         preCrawledData = await crawlService.crawlStory(url);
         if (!mounted) return;
-        alternativeName = _extractAlternativeName(preCrawledData);
+        originalTitle = preCrawledData['title']?.toString().trim();
+        alternativeNames = _extractAlternativeNames(preCrawledData);
         print(
-          '[CrawlScreen][selectSearchResult] TruyenGGVN alternativeName=$alternativeName',
+          '[CrawlScreen][selectSearchResult] pre-crawl title="$originalTitle" aliases=$alternativeNames',
         );
+      } catch (e) {
+        print('[CrawlScreen][selectSearchResult] pre-crawl failed: $e');
+      }
+
+      // Tiêu đề trang truyện chính xác hơn tiêu đề kết quả tìm kiếm.
+      final searchTitle = (originalTitle != null && originalTitle.isNotEmpty)
+          ? originalTitle
+          : resultTitle;
+      if (resultTitle.isNotEmpty &&
+          resultTitle.toLowerCase() != searchTitle.toLowerCase() &&
+          !alternativeNames.contains(resultTitle)) {
+        alternativeNames = [resultTitle, ...alternativeNames];
       }
 
       print(
-        '[CrawlScreen][selectSearchResult] goi searchMangaDex title="$title"',
+        '[CrawlScreen][selectSearchResult] goi searchMetadata title="$searchTitle" aliases=$alternativeNames',
       );
-      final mdResult = await crawlService.searchMangaDex(title);
+      final metadataResult = await crawlService.searchMetadata(
+        title: searchTitle,
+        alternativeTitles: alternativeNames,
+      );
       if (!mounted) return;
 
-      final mdStatus = mdResult['status']?.toString() ?? '';
+      final status = metadataResult['status']?.toString() ?? '';
       print(
-        '[CrawlScreen][selectSearchResult] MangaDex status=$mdStatus mangaDexId=${mdResult['mangaDexId']} resultsCount=${(mdResult['results'] as List?)?.length ?? 0}',
+        '[CrawlScreen][selectSearchResult] metadata status=$status provider=${metadataResult['metadataProvider']} metadataId=${metadataResult['metadataId']} resultsCount=${(metadataResult['results'] as List?)?.length ?? 0}',
       );
 
-      // MangaDex la chinh.
-      if (mdStatus == 'DIRECT_MATCH') {
-        final mangaDexId = mdResult['mangaDexId']?.toString();
-        print(
-          '[CrawlScreen][selectSearchResult] MangaDex DIRECT_MATCH mangaDexId=$mangaDexId',
+      if (status == 'DIRECT_MATCH') {
+        final provider = MetadataProviderDisplay.fromValue(
+          metadataResult['metadataProvider']?.toString() ??
+              metadataResult['provider']?.toString(),
         );
-        if (mangaDexId != null && mangaDexId.isNotEmpty) {
-          _metaProvider = MetadataProvider.mangaDex;
-          await _loadMangaDexDetail(
-            mangaDexId,
+        final metadataId = metadataResult['metadataId']?.toString() ??
+            metadataResult['providerId']?.toString();
+        final metadataInfo = metadataResult['metadataInfo'];
+
+        if (provider != null &&
+            metadataId != null &&
+            metadataId.isNotEmpty &&
+            metadataInfo is Map) {
+          await _fetchChapters(
+            url,
             preCrawledData: preCrawledData,
             originalTitle: originalTitle,
+            metadataProvider: provider,
+            metadataId: metadataId,
+            metadataInfo: Map<String, dynamic>.from(metadataInfo),
           );
           if (!mounted) return;
           return;
         }
-      } else if (mdStatus == 'MULTIPLE_RESULTS') {
-        final results = mdResult['results'] as List?;
-        final resultsCount = results?.length ?? 0;
+      } else if (status == 'MULTIPLE_RESULTS') {
         print(
-          '[CrawlScreen][selectSearchResult] MangaDex MULTIPLE_RESULTS resultsCount=$resultsCount',
-        );
-        if (results != null && results.isNotEmpty) {
-          final candidates = results
-              .map<Map<String, dynamic>>(
-                (item) => Map<String, dynamic>.from(item as Map),
-              )
-              .toList();
-
-          setState(() {
-            _metaProvider = MetadataProvider.mangaDex;
-          });
-        }
-      } else {
-        print(
-          '[CrawlScreen][selectSearchResult] MangaDex status khac ($mdStatus)',
+          '[CrawlScreen][selectSearchResult] metadata MULTIPLE_RESULTS -> bo qua de tranh chon sai',
         );
       }
 
-      // Neu MangaDex khong co ket qua hoac loi, fetch chapters bang website data.
       print(
-        '[CrawlScreen][selectSearchResult] MangaDex khong co DIRECT_MATCH -> fetchChapters',
+        '[CrawlScreen][selectSearchResult] metadata khong co DIRECT_MATCH -> fetchChapters',
       );
       await _fetchChapters(
         url,
@@ -558,8 +528,9 @@ class _CrawlScreenState extends State<CrawlScreen> {
     String url, {
     Map<String, dynamic>? preCrawledData,
     String? originalTitle,
-    Map<String, dynamic>? mangaDexInfo,
-    String? mangaDexId,
+    Map<String, dynamic>? metadataInfo,
+    MetadataProvider? metadataProvider,
+    String? metadataId,
   }) async {
     print(
       '[CrawlScreen][_fetchChapters] bat dau url=$url preCrawled=${preCrawledData != null}',
@@ -598,12 +569,27 @@ class _CrawlScreenState extends State<CrawlScreen> {
 
       final initialStoryId = _readStoryId(normalizedData['selectedStoryId']);
 
-      if (mangaDexId != null && mangaDexId.isNotEmpty && mangaDexInfo != null) {
-        final mdInfo = MetadataInfo.fromMangaDex(mangaDexInfo);
-        _mergeMetadata(normalizedData, mdInfo);
-        normalizedData['mangaDexId'] = mangaDexId;
-        normalizedData['mangaDexInfo'] = mangaDexInfo;
-        normalizedData['provider'] = 'MangaDex';
+      if (metadataInfo != null) {
+        final info = MetadataInfo.fromMetadata(
+          metadataInfo,
+          fallbackProvider: metadataProvider,
+        );
+        _mergeMetadata(normalizedData, info);
+
+        final resolvedMetadataId = info.providerId.isNotEmpty
+            ? info.providerId
+            : (metadataId ?? '');
+        if (resolvedMetadataId.isNotEmpty) {
+          normalizedData['metadataId'] = resolvedMetadataId;
+        }
+        normalizedData['metadataProvider'] = info.provider.value;
+        normalizedData['metadataInfo'] = metadataInfo;
+        normalizedData['provider'] = info.provider.label;
+
+        if (info.provider == MetadataProvider.mangaDex) {
+          normalizedData['mangaDexId'] = resolvedMetadataId;
+          normalizedData['mangaDexInfo'] = metadataInfo;
+        }
       }
 
       if (!mounted) return;
@@ -621,84 +607,83 @@ class _CrawlScreenState extends State<CrawlScreen> {
   /// Gộp metadata từ provider vào payload crawl.
   void _mergeMetadata(Map<String, dynamic> data, MetadataInfo info) {
     data['provider'] = info.provider.label;
+    data['metadataProvider'] = info.provider.value;
 
+    if (info.providerId.isNotEmpty) {
+      data['metadataId'] = info.providerId;
+    }
     if (info.provider == MetadataProvider.mangaDex) {
       data['mangaDexId'] = info.providerId;
     }
 
-    data['title'] = info.title;
+    if (info.title.isNotEmpty) {
+      data['title'] = info.title;
+    }
 
-    // Giữ nguyên cover từ source crawler, không ghi đè bằng cover MangaDex.
-    data['description'] = info.synopsis;
-    data['author'] = info.authors;
+    // Giữ nguyên cover từ source crawler, không ghi đè bằng cover metadata.
+    if (info.synopsis.isNotEmpty) {
+      data['description'] = info.synopsis;
+    }
+    if (info.authors.isNotEmpty) {
+      data['author'] = info.authors;
+    }
   }
 
-  /// Trich xuat alternative name tu thong tin website da crawl.
-  String? _extractAlternativeName(Map<String, dynamic> data) {
+  /// Trich xuat tat ca ten khac tu thong tin website da crawl.
+  List<String> _extractAlternativeNames(Map<String, dynamic> data) {
+    final result = <String>{};
+    final originalTitle = data['title']?.toString().trim().toLowerCase() ?? '';
+
+    void addValue(dynamic value) {
+      if (value is List) {
+        for (final item in value) {
+          addValue(item);
+        }
+        return;
+      }
+      final text = value?.toString().trim() ?? '';
+      if (text.isEmpty) return;
+      for (final part in text.split(RegExp(r'\s*[|;\n]\s*'))) {
+        final alias = part.trim();
+        if (alias.isEmpty) continue;
+        if (alias.toLowerCase() == originalTitle) continue;
+        result.add(alias);
+      }
+    }
+
     final information = data['information'];
     if (information is List) {
       for (final item in information) {
-        if (item is Map) {
-          final label = item['label']?.toString().trim();
-          if (label == 'Alternative Name') {
-            final value = item['value'];
-            if (value != null && value.toString().trim().isNotEmpty) {
-              return value.toString().trim();
-            }
-          }
+        if (item is! Map) continue;
+        final label = item['label']?.toString().trim() ?? '';
+        if (_isAlternativeLabel(label)) {
+          addValue(item['value']);
         }
       }
     }
-    return null;
+
+    for (final key in const [
+      'alternativeTitles',
+      'alternativeNames',
+      'otherNames',
+      'synonyms',
+    ]) {
+      addValue(data[key]);
+    }
+
+    return result.toList();
   }
 
-  Future<void> _loadMangaDexDetail(
-    String mangaDexId, {
-    Map<String, dynamic>? preCrawledData,
-    String? originalTitle,
-  }) async {
-    print(
-      '[CrawlScreen][_loadMangaDexDetail] bat dau mangaDexId=$mangaDexId pendingUrl=$_crawlUrlPending',
-    );
-    setState(() {
-      _metaProvider = MetadataProvider.mangaDex;
-    });
-    try {
-      final detail = await crawlService.getMangaDexDetail(mangaDexId);
-      if (!mounted) return;
-
-      print(
-        '[CrawlScreen][_loadMangaDexDetail] detail nhan duoc mangaDexId=${detail['mangaDexId']} title=${detail['title']} keys=${detail.keys.toList()}',
-      );
-
-      final pendingUrl = _crawlUrlPending;
-      print('[CrawlScreen][_loadMangaDexDetail] pendingUrl=$pendingUrl');
-      if (pendingUrl != null && mounted) {
-        _crawlUrlPending = null;
-        await _fetchChapters(
-          pendingUrl,
-          mangaDexInfo: detail,
-          mangaDexId: mangaDexId,
-          preCrawledData: preCrawledData,
-          originalTitle: originalTitle,
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      print('[CrawlScreen][_loadMangaDexDetail] Loi lay chi tiet MangaDex: $e');
-      _showSnackBar('Loi lay chi tiet MangaDex: $e');
-      final pendingUrl = _crawlUrlPending;
-      if (pendingUrl != null && mounted) {
-        _crawlUrlPending = null;
-        await _fetchChapters(
-          pendingUrl,
-          mangaDexInfo: null,
-          mangaDexId: null,
-          preCrawledData: preCrawledData,
-          originalTitle: originalTitle,
-        );
-      }
-    }
+  bool _isAlternativeLabel(String label) {
+    final lower = label.toLowerCase().trim();
+    return lower.contains('alternative') ||
+        lower.contains('other name') ||
+        lower.contains('othername') ||
+        lower.contains('synonym') ||
+        lower == 'aka' ||
+        lower.contains('also known as') ||
+        lower.contains('tên khác') ||
+        lower.contains('ten khac');
   }
 
   void backToSearch() {
@@ -708,11 +693,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
       _selectedStoryId = null;
       _createNewStory = true;
       chapterRangeController.clear();
-
-      _crawlUrlPending = null;
-      _crawlOriginalTitle = null;
-      _crawlUsedAlternative = false;
-      _metaProvider = null;
     });
   }
 
@@ -768,34 +748,66 @@ class _CrawlScreenState extends State<CrawlScreen> {
     try {
       final payload = Map<String, dynamic>.from(data!);
 
-      // MangaDex co uu tien cao nhat.
-      if (payload['mangaDexInfo'] != null && payload['mangaDexInfo'] is Map) {
-        final completeMdInfo = Map<String, dynamic>.from(
-          payload['mangaDexInfo'] as Map,
+      final rawMetadataInfo =
+          payload['metadataInfo'] ?? payload['mangaDexInfo'];
+
+      if (rawMetadataInfo is Map) {
+        final completeMetadataInfo = Map<String, dynamic>.from(
+          rawMetadataInfo,
         );
+        final provider = MetadataProviderDisplay.fromValue(
+          payload['metadataProvider']?.toString() ??
+              completeMetadataInfo['metadataProvider']?.toString() ??
+              completeMetadataInfo['provider']?.toString(),
+        );
+        final resolvedProvider = provider ??
+            (payload['mangaDexInfo'] != null
+                ? MetadataProvider.mangaDex
+                : null);
+        final metadataId = completeMetadataInfo['metadataId']?.toString() ??
+            completeMetadataInfo['providerId']?.toString() ??
+            completeMetadataInfo['mangaDexId']?.toString() ??
+            completeMetadataInfo['id']?.toString() ??
+            payload['metadataId']?.toString() ??
+            payload['mangaDexId']?.toString() ??
+            '';
 
-        payload['mangaDexInfo'] = completeMdInfo;
-        payload['mangaDexId'] =
-            completeMdInfo['mangaDexId'] ??
-            completeMdInfo['id'] ??
-            payload['mangaDexId'];
+        payload['metadataInfo'] = completeMetadataInfo;
+        if (resolvedProvider != null) {
+          payload['metadataProvider'] = resolvedProvider.value;
+        }
+        if (metadataId.isNotEmpty) {
+          payload['metadataId'] = metadataId;
+        }
 
-        // Khi co MangaDex, CHI dung thong tin cua MangaDex, khong gop voi website.
-        payload['title'] =
-            completeMdInfo['title']?.toString() ?? completeMdInfo['title'];
+        final title = completeMetadataInfo['title']?.toString().trim() ?? '';
+        if (title.isNotEmpty) {
+          payload['title'] = title;
+        }
 
-        // Giu nguyen cover tu source crawler, khong ghi de boi cover MangaDex.
+        // Giu nguyen cover tu source crawler, khong ghi de bang cover metadata.
+        final synopsis =
+            completeMetadataInfo['synopsis']?.toString().trim() ?? '';
+        if (synopsis.isNotEmpty) {
+          payload['description'] = synopsis;
+        }
 
-        payload['description'] =
-            completeMdInfo['synopsis']?.toString() ??
-            completeMdInfo['synopsis'];
+        final authors =
+            completeMetadataInfo['authors']?.toString().trim() ?? '';
+        if (authors.isNotEmpty) {
+          payload['author'] = authors;
+        }
 
-        payload['author'] =
-            completeMdInfo['authors']?.toString() ?? completeMdInfo['authors'];
-
-        // Khong them field MangaDex vao payload['information'].
-        // MangaDex da duoc luu day du trong payload['mangaDexInfo'].
-        // information chi giu lai thong tin do website crawler tra ve.
+        if (resolvedProvider == MetadataProvider.mangaDex) {
+          payload['mangaDexId'] = metadataId;
+          payload['mangaDexInfo'] = completeMetadataInfo;
+        }
+      } else {
+        payload.remove('metadataInfo');
+        payload.remove('metadataProvider');
+        payload.remove('metadataId');
+        payload.remove('mangaDexInfo');
+        payload.remove('mangaDexId');
       }
 
       payload['chapters'] = selectedChapters;
@@ -1244,7 +1256,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
                         _selectedStoryId = null;
                         _createNewStory = true;
                         chapterRangeController.clear();
-                        _crawlUrlPending = null;
                       });
                     },
             ),
@@ -1309,35 +1320,48 @@ class _CrawlScreenState extends State<CrawlScreen> {
   }
 
   Widget _buildMalInfo() {
-    final mangaDexInfo = data?['mangaDexInfo'];
-    if (mangaDexInfo == null) {
+    final metadataInfo = data?['metadataInfo'] ?? data?['mangaDexInfo'];
+    if (metadataInfo == null) {
       return const SizedBox.shrink();
     }
 
-    final title = mangaDexInfo['title']?.toString() ?? '';
-    final japaneseTitle = mangaDexInfo['japaneseTitle']?.toString() ?? '';
-    final authors = mangaDexInfo['authors']?.toString() ?? '';
-    final type = mangaDexInfo['type']?.toString() ?? '';
-    final status = mangaDexInfo['status']?.toString() ?? '';
+    final provider = MetadataProviderDisplay.fromValue(
+          data?['metadataProvider']?.toString() ??
+              metadataInfo['metadataProvider']?.toString() ??
+              metadataInfo['provider']?.toString() ??
+              metadataInfo['providerLabel']?.toString(),
+        ) ??
+        MetadataProvider.mangaDex;
+    final providerLabel = provider.label;
+
+    final title = metadataInfo['title']?.toString() ?? '';
+    final japaneseTitle = metadataInfo['japaneseTitle']?.toString() ?? '';
+    final authors = metadataInfo['authors']?.toString() ?? '';
+    final type = metadataInfo['type']?.toString() ?? '';
+    final status = metadataInfo['status']?.toString() ?? '';
     final cover = data?['cover']?.toString() ??
-        mangaDexInfo['cover']?.toString() ?? '';
-    final isMangaDexCover = cover.contains('mangadex.org');
+        metadataInfo['cover']?.toString() ?? '';
+    final isMangaDexCover =
+        provider == MetadataProvider.mangaDex && cover.contains('mangadex.org');
     print(
-      '[CrawlScreen][_buildMalInfo] cover value="$cover" isMangaDex=$isMangaDexCover',
+      '[CrawlScreen][_buildMalInfo] provider=$providerLabel cover value="$cover" isMangaDex=$isMangaDexCover',
     );
-    final score = mangaDexInfo['score']?.toString() ?? '';
-    final genresRaw = mangaDexInfo['genres'];
+    final score = metadataInfo['score']?.toString() ?? '';
+    final genresRaw = metadataInfo['genres'];
     final genres = genresRaw is List
         ? genresRaw.whereType<String>().toList()
         : (genresRaw?.toString() ?? '')
               .split(',')
               .where((s) => s.isNotEmpty)
               .toList();
-    final crawlOriginalTitle = _crawlUsedAlternative
-        ? _crawlOriginalTitle
-        : null;
-    final mangaDexId = mangaDexInfo['mangaDexId']?.toString() ?? '';
-    final allTitlesRaw = mangaDexInfo['allTitles'];
+    final metadataId = (data?['metadataId'] ??
+            metadataInfo['metadataId'] ??
+            metadataInfo['providerId'] ??
+            metadataInfo['mangaDexId'] ??
+            metadataInfo['id'])
+        ?.toString() ??
+        '';
+    final allTitlesRaw = metadataInfo['allTitles'];
     final allTitlesByLocale = _parseAllTitlesByLocale(allTitlesRaw);
 
     return Padding(
@@ -1356,7 +1380,7 @@ class _CrawlScreenState extends State<CrawlScreen> {
                   _StoryCoverWidget(
                     coverUrl: cover,
                     isMangaDex: isMangaDexCover,
-                    storyUrl: mangaDexInfo['url']?.toString() ?? '',
+                    storyUrl: metadataInfo['url']?.toString() ?? '',
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -1371,13 +1395,13 @@ class _CrawlScreenState extends State<CrawlScreen> {
                                 vertical: 4,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.blue.withValues(alpha: 0.1),
+                                color: provider.badgeColor.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
-                                'MangaDex',
+                                providerLabel,
                                 style: TextStyle(
-                                  color: Colors.blue,
+                                  color: provider.badgeColor,
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -1428,17 +1452,6 @@ class _CrawlScreenState extends State<CrawlScreen> {
                   icon: Icons.translate,
                   label: 'Japanese Title',
                   value: japaneseTitle,
-                ),
-              ],
-
-              // TruyenGGVN ten goc (luu thanh Alternative Name).
-              if (crawlOriginalTitle != null &&
-                  crawlOriginalTitle.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                _buildMalMetadataRow(
-                  icon: Icons.title_outlined,
-                  label: 'Tên gốc',
-                  value: crawlOriginalTitle,
                 ),
               ],
 
@@ -1510,17 +1523,17 @@ class _CrawlScreenState extends State<CrawlScreen> {
               ],
 
               // Provider ID and URL.
-              if (mangaDexId.isNotEmpty ||
-                  mangaDexInfo['url']?.toString().isNotEmpty == true) ...[
+              if (metadataId.isNotEmpty ||
+                  metadataInfo['url']?.toString().isNotEmpty == true) ...[
                 const SizedBox(height: 14),
                 const Divider(height: 1),
                 const SizedBox(height: 10),
                 Row(
                   children: [
-                    if (mangaDexId.isNotEmpty)
+                    if (metadataId.isNotEmpty)
                       Expanded(
                         child: Text(
-                          'MangaDex ID: $mangaDexId',
+                          '$providerLabel ID: $metadataId',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -1530,15 +1543,15 @@ class _CrawlScreenState extends State<CrawlScreen> {
                         ),
                       ),
                     const Spacer(),
-                    if (mangaDexInfo['url']?.toString().isNotEmpty == true)
+                    if (metadataInfo['url']?.toString().isNotEmpty == true)
                       TextButton.icon(
                         onPressed: () {
-                          final url = mangaDexInfo['url']?.toString() ?? '';
+                          final url = metadataInfo['url']?.toString() ?? '';
 
-                          _showSnackBar('MangaDex URL: $url');
+                          _showSnackBar('$providerLabel URL: $url');
                         },
                         icon: const Icon(Icons.link, size: 15),
-                        label: Text('MangaDex'),
+                        label: Text(providerLabel),
                         style: TextButton.styleFrom(
                           visualDensity: VisualDensity.compact,
                         ),
@@ -1582,9 +1595,11 @@ class _CrawlScreenState extends State<CrawlScreen> {
   // STORY HEADER (WEBSITE FALLBACK)
   // =========================================================
 
-  /// Hiển thị tiêu đề và bìa từ website khi không có MangaDex.
+  /// Hiển thị tiêu đề và bìa từ website khi không có metadata provider.
   Widget _buildStoryHeader() {
-    if (data?['mangaDexInfo'] != null) return const SizedBox.shrink();
+    if ((data?['metadataInfo'] ?? data?['mangaDexInfo']) != null) {
+      return const SizedBox.shrink();
+    }
 
     final title = data?['title']?.toString().trim() ?? '';
     final coverFromData = data?['cover']?.toString().trim() ?? '';
@@ -1780,8 +1795,8 @@ class _CrawlScreenState extends State<CrawlScreen> {
   }
 
   Widget _buildInformation() {
-    // Khi đã có MangaDex, không hiển thị thêm thông tin từ website source.
-    if (data?['mangaDexInfo'] != null) {
+    // Khi đã có metadata provider, không hiển thị thêm thông tin từ website source.
+    if ((data?['metadataInfo'] ?? data?['mangaDexInfo']) != null) {
       return const SizedBox.shrink();
     }
 

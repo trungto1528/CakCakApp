@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/api_config.dart';
+import '../models/metadata_provider.dart';
 
 class CrawlService {
   String get _baseUrl => ApiConfig.crawlerUrl;
@@ -127,6 +128,94 @@ class CrawlService {
     }
 
     throw _httpError('MangaDex detail failed', res);
+  }
+
+  // ============================================================
+  // METADATA PROVIDERS
+  // ============================================================
+
+  Future<Map<String, dynamic>> searchMetadata({
+    int? storyId,
+    required String title,
+    List<String> alternativeTitles = const [],
+  }) async {
+    final trimmed = title.trim();
+    final body = <String, dynamic>{
+      'title': trimmed,
+      'alternativeTitles': alternativeTitles
+          .map((value) => value.trim())
+          .where((value) => value.isNotEmpty)
+          .toList(),
+    };
+    if (storyId != null) {
+      body['storyId'] = storyId;
+    }
+
+    print(
+      '[Metadata][searchMetadata] title="$trimmed" '
+      'aliases=${alternativeTitles.length} url=$_baseUrl/metadata/search',
+    );
+
+    final res = await http.post(
+      Uri.parse('$_baseUrl/metadata/search'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+
+    if (res.statusCode == 200) {
+      return _decodeMap(
+        res.body,
+        errorMessage: 'Dữ liệu tìm kiếm metadata không hợp lệ',
+      );
+    }
+
+    throw _httpError('Metadata search failed', res);
+  }
+
+  Future<Map<String, dynamic>> getMetadataDetail(
+    MetadataProvider provider,
+    String providerId,
+  ) async {
+    final res = await http.get(
+      Uri.parse(
+        '$_baseUrl/metadata/detail/${provider.value}/'
+        '${Uri.encodeComponent(providerId)}',
+      ),
+    );
+
+    if (res.statusCode == 200) {
+      return _decodeMap(
+        res.body,
+        errorMessage: 'Dữ liệu chi tiết metadata không hợp lệ',
+      );
+    }
+
+    throw _httpError('${provider.label} detail failed', res);
+  }
+
+  Future<Map<String, dynamic>> linkMetadata(
+    int storyId,
+    MetadataProvider provider,
+    String providerId,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$_baseUrl/metadata/link'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'storyId': storyId,
+        'provider': provider.value,
+        'providerId': providerId,
+      }),
+    );
+
+    if (res.statusCode == 200) {
+      return _decodeMap(
+        res.body,
+        errorMessage: 'Dữ liệu liên kết metadata không hợp lệ',
+      );
+    }
+
+    throw _httpError('Metadata link failed', res);
   }
 
   // ============================================================
