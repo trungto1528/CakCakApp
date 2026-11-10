@@ -3,15 +3,15 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 enum MetadataProvider {
-  suicaoDex,
+  comick,
   mangaDex,
 }
 
 extension MetadataProviderDisplay on MetadataProvider {
   String get label {
     switch (this) {
-      case MetadataProvider.suicaoDex:
-        return 'SuicaoDex';
+      case MetadataProvider.comick:
+        return 'Comick';
       case MetadataProvider.mangaDex:
         return 'MangaDex';
     }
@@ -19,8 +19,8 @@ extension MetadataProviderDisplay on MetadataProvider {
 
   String get value {
     switch (this) {
-      case MetadataProvider.suicaoDex:
-        return 'SUICAODEX';
+      case MetadataProvider.comick:
+        return 'COMICK';
       case MetadataProvider.mangaDex:
         return 'MANGADEX';
     }
@@ -28,8 +28,8 @@ extension MetadataProviderDisplay on MetadataProvider {
 
   Color get badgeColor {
     switch (this) {
-      case MetadataProvider.suicaoDex:
-        return const Color(0xFF00897B);
+      case MetadataProvider.comick:
+        return const Color(0xFFEF6C00);
       case MetadataProvider.mangaDex:
         return const Color(0xFF1976D2);
     }
@@ -41,10 +41,9 @@ extension MetadataProviderDisplay on MetadataProvider {
         .toLowerCase()
         .replaceAll(RegExp(r'[^a-z0-9]'), '');
     switch (normalized) {
-      case 'suicaodex':
-      case 'suicao':
-      case 'sdx':
-        return MetadataProvider.suicaoDex;
+      case 'comick':
+      case 'ck':
+        return MetadataProvider.comick;
       case 'mangadex':
       case 'md':
         return MetadataProvider.mangaDex;

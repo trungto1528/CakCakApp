@@ -473,7 +473,8 @@ class _CrawlScreenState extends State<CrawlScreen> {
           metadataResult['metadataProvider']?.toString() ??
               metadataResult['provider']?.toString(),
         );
-        final metadataId = metadataResult['metadataId']?.toString() ??
+        final metadataId =
+            metadataResult['metadataId']?.toString() ??
             metadataResult['providerId']?.toString();
         final metadataInfo = metadataResult['metadataInfo'];
 
@@ -620,7 +621,10 @@ class _CrawlScreenState extends State<CrawlScreen> {
       data['title'] = info.title;
     }
 
-    // Giữ nguyên cover từ source crawler, không ghi đè bằng cover metadata.
+    if (info.provider == MetadataProvider.comick && info.cover.isNotEmpty) {
+      data['cover'] = info.cover;
+    }
+
     if (info.synopsis.isNotEmpty) {
       data['description'] = info.synopsis;
     }
@@ -752,19 +756,19 @@ class _CrawlScreenState extends State<CrawlScreen> {
           payload['metadataInfo'] ?? payload['mangaDexInfo'];
 
       if (rawMetadataInfo is Map) {
-        final completeMetadataInfo = Map<String, dynamic>.from(
-          rawMetadataInfo,
-        );
+        final completeMetadataInfo = Map<String, dynamic>.from(rawMetadataInfo);
         final provider = MetadataProviderDisplay.fromValue(
           payload['metadataProvider']?.toString() ??
               completeMetadataInfo['metadataProvider']?.toString() ??
               completeMetadataInfo['provider']?.toString(),
         );
-        final resolvedProvider = provider ??
+        final resolvedProvider =
+            provider ??
             (payload['mangaDexInfo'] != null
                 ? MetadataProvider.mangaDex
                 : null);
-        final metadataId = completeMetadataInfo['metadataId']?.toString() ??
+        final metadataId =
+            completeMetadataInfo['metadataId']?.toString() ??
             completeMetadataInfo['providerId']?.toString() ??
             completeMetadataInfo['mangaDexId']?.toString() ??
             completeMetadataInfo['id']?.toString() ??
@@ -1325,7 +1329,8 @@ class _CrawlScreenState extends State<CrawlScreen> {
       return const SizedBox.shrink();
     }
 
-    final provider = MetadataProviderDisplay.fromValue(
+    final provider =
+        MetadataProviderDisplay.fromValue(
           data?['metadataProvider']?.toString() ??
               metadataInfo['metadataProvider']?.toString() ??
               metadataInfo['provider']?.toString() ??
@@ -1339,8 +1344,8 @@ class _CrawlScreenState extends State<CrawlScreen> {
     final authors = metadataInfo['authors']?.toString() ?? '';
     final type = metadataInfo['type']?.toString() ?? '';
     final status = metadataInfo['status']?.toString() ?? '';
-    final cover = data?['cover']?.toString() ??
-        metadataInfo['cover']?.toString() ?? '';
+    final cover =
+        data?['cover']?.toString() ?? metadataInfo['cover']?.toString() ?? '';
     final isMangaDexCover =
         provider == MetadataProvider.mangaDex && cover.contains('mangadex.org');
     print(
@@ -1354,12 +1359,13 @@ class _CrawlScreenState extends State<CrawlScreen> {
               .split(',')
               .where((s) => s.isNotEmpty)
               .toList();
-    final metadataId = (data?['metadataId'] ??
-            metadataInfo['metadataId'] ??
-            metadataInfo['providerId'] ??
-            metadataInfo['mangaDexId'] ??
-            metadataInfo['id'])
-        ?.toString() ??
+    final metadataId =
+        (data?['metadataId'] ??
+                metadataInfo['metadataId'] ??
+                metadataInfo['providerId'] ??
+                metadataInfo['mangaDexId'] ??
+                metadataInfo['id'])
+            ?.toString() ??
         '';
     final allTitlesRaw = metadataInfo['allTitles'];
     final allTitlesByLocale = _parseAllTitlesByLocale(allTitlesRaw);
@@ -1395,7 +1401,9 @@ class _CrawlScreenState extends State<CrawlScreen> {
                                 vertical: 4,
                               ),
                               decoration: BoxDecoration(
-                                color: provider.badgeColor.withValues(alpha: 0.1),
+                                color: provider.badgeColor.withValues(
+                                  alpha: 0.1,
+                                ),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
@@ -2175,10 +2183,24 @@ class _MangaDexCachedImageState extends State<_MangaDexCachedImage> {
     }
   }
 
-  Widget _placeholder() {
+  static Widget _coverLoading(double width, double height) {
     return Container(
-      width: widget.width,
-      height: widget.height,
+      width: width,
+      height: height,
+      color: Colors.grey[200],
+      alignment: Alignment.center,
+      child: const SizedBox(
+        width: 24,
+        height: 24,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      ),
+    );
+  }
+
+  static Widget _coverErrorPlaceholder(double width, double height) {
+    return Container(
+      width: width,
+      height: height,
       color: Colors.grey[300],
       alignment: Alignment.center,
       child: const Icon(
@@ -2192,7 +2214,7 @@ class _MangaDexCachedImageState extends State<_MangaDexCachedImage> {
   @override
   Widget build(BuildContext context) {
     if (widget.imageUrl.isEmpty || _isCoolingDown) {
-      return _placeholder();
+      return _coverErrorPlaceholder(widget.width, widget.height);
     }
 
     return CachedNetworkImage(
@@ -2204,10 +2226,10 @@ class _MangaDexCachedImageState extends State<_MangaDexCachedImage> {
       fit: widget.fit,
       fadeInDuration: Duration.zero,
       fadeOutDuration: Duration.zero,
-      placeholder: (_, __) => _placeholder(),
+      placeholder: (_, __) => _coverLoading(widget.width, widget.height),
       errorWidget: (_, __, error) {
         _handleImageError(error);
-        return _placeholder();
+        return _coverErrorPlaceholder(widget.width, widget.height);
       },
     );
   }
@@ -2235,6 +2257,7 @@ class _StoryCoverWidget extends StatefulWidget {
 class _StoryCoverWidgetState extends State<_StoryCoverWidget> {
   String _coverUrl = ''; // bắt đầu rỗng → hiển thị placeholder, load chậm sau
   bool _coverLoaded = false;
+  bool _coverIsLoading = false;
 
   @override
   void initState() {
@@ -2242,17 +2265,30 @@ class _StoryCoverWidgetState extends State<_StoryCoverWidget> {
     debugPrint(
       '[CrawlScreen][_StoryCoverWidget] initState coverUrl=${widget.coverUrl}',
     );
-    // Đợi render xong nội dung khác mới load cover (tránh rate limit MangaDex)
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      Future.delayed(const Duration(milliseconds: 500), () {
+    // Comick: load ngay vì cover từ Comick không bị rate limit như MangaDex.
+    // MangaDex: đợi render xong nội dung khác mới load cover để tránh rate limit.
+    if (widget.isMangaDex) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (!mounted) return;
+          setState(() {
+            _coverUrl = widget.coverUrl;
+            _coverLoaded = true;
+            _coverIsLoading = true;
+          });
+        });
+      });
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         setState(() {
           _coverUrl = widget.coverUrl;
           _coverLoaded = true;
+          _coverIsLoading = true;
         });
       });
-    });
+    }
   }
 
   @override
@@ -2285,7 +2321,7 @@ class _StoryCoverWidgetState extends State<_StoryCoverWidget> {
   Widget build(BuildContext context) {
     final displayUrl = _coverUrl;
     if (displayUrl.isEmpty) {
-      return _placeholder();
+      return _coverLoading(90, 130);
     }
 
     if (widget.isMangaDex) {
@@ -2320,22 +2356,36 @@ class _StoryCoverWidgetState extends State<_StoryCoverWidget> {
         height: 130,
         fit: BoxFit.cover,
         fadeInDuration: Duration.zero,
-        placeholder: (_, __) => _placeholder(),
+        placeholder: (_, __) => _coverLoading(90, 130),
         errorWidget: (_, __, error) {
           debugPrint(
             '[CrawlScreen][_StoryCoverWidget] ERROR '
             'url=$displayUrl error=$error',
           );
-          return _placeholder();
+          return _coverErrorPlaceholder(90, 130);
         },
       ),
     );
   }
 
-  Widget _placeholder() {
+  static Widget _coverLoading(double width, double height) {
     return Container(
-      width: 90,
-      height: 130,
+      width: width,
+      height: height,
+      color: Colors.grey[200],
+      alignment: Alignment.center,
+      child: const SizedBox(
+        width: 24,
+        height: 24,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      ),
+    );
+  }
+
+  static Widget _coverErrorPlaceholder(double width, double height) {
+    return Container(
+      width: width,
+      height: height,
       color: Colors.grey[300],
       alignment: Alignment.center,
       child: const Icon(

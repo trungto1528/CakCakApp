@@ -1,4 +1,4 @@
 # Changelog
 
-## Éo nhớ
-- Éo nhớ lmj nx, kệ đi.
+## Crawl
+- Chuyển qua Comick làm ưu tiên -> MangaDex -> gốc.
