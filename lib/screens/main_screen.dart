@@ -3,6 +3,7 @@ import '../services/ota.dart';
 import 'home_screen.dart';
 import 'library_screen.dart';
 import 'profile_screen.dart';
+import 'ai_chat_screen.dart';
 import '../models/app_theme_mode.dart';
 class MainScreen extends StatefulWidget {
   final AppThemeMode currentMode;
@@ -31,6 +32,7 @@ class _MainScreenState extends State<MainScreen> {
         currentMode: widget.currentMode,
         onThemeChanged: widget.onThemeChanged,
       ),
+      const AiChatScreen(),
     ];
     return Scaffold(
       body: pages[_selectedIndex],
@@ -56,6 +58,11 @@ class _MainScreenState extends State<MainScreen> {
             icon: Icon(Icons.person_outline),
             selectedIcon: Icon(Icons.person),
             label: 'Options',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.chat_outlined),
+            selectedIcon: Icon(Icons.chat),
+            label: 'AI Chat',
           ),
         ],
       ),
