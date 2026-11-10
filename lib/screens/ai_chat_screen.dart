@@ -1,86 +1,140 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../config/api_config.dart';
 import '../services/app_preference.dart';
-import '../services/ai_service.dart';
+import '../services/ai_ws_service.dart';
 import '../models/ai_chat_message.dart';
-import '../widgets/ai_message_bubble.dart';
+import '../models/ai_source.dart';
+import '../models/ai_ws_message.dart';
+import '../widgets/ai_streaming_bubble.dart';
 import '../widgets/ai_source_item.dart';
 import '../widgets/ai_status_indicator.dart';
+
 class AiChatScreen extends StatefulWidget {
   const AiChatScreen({super.key});
   @override
   State<AiChatScreen> createState() => _AiChatScreenState();
 }
+
 class _AiChatScreenState extends State<AiChatScreen> {
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
-  final _aiService = AiService();
+  final _aiWsService = AiWsService();
   final List<AiChatMessage> _messages = [];
-  String? _conversationId;
   bool _isSending = false;
-  AiStatus _status = AiStatus.idle;
-  AiChatResponse? _lastResponse;
   String? _error;
-  bool get _hasSearchSources =>
-      _lastResponse != null &&
-      _lastResponse!.usedSearch &&
-      _lastResponse!.sources.isNotEmpty;
+  bool _isConnecting = false;
+  AiStatus _status = AiStatus.idle;
+  List<AiWsSource> _sources = [];
+
   @override
-  void dispose() {
-    _controller.dispose();
-    _scrollController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _connect();
   }
-  Future<void> _sendMessage() async {
-    final text = _controller.text.trim();
-    if (text.isEmpty || _isSending) return;
-    setState(() {
-      _messages.add(AiChatMessage(role: 'user', content: text));
-      _controller.clear();
-      _isSending = true;
-      _status = AiStatus.thinking;
-      _error = null;
-      _lastResponse = null;
-    });
-    _scrollToBottom();
+
+  Future<void> _connect() async {
+    setState(() => _isConnecting = true);
     try {
       final prefs = await AppPreferences.getInstance();
       final userStr = prefs.getString('user');
       if (userStr == null || userStr.isEmpty) {
         throw Exception('Chua dang nhap. Vui long dang nhap de su dung AI chat.');
       }
-      final history = _messages
-          .take(20)
-          .map((e) => AiChatMessage(role: e.role, content: e.content))
-          .toList();
-      final res = await _aiService.sendMessage(
-        message: text,
-        conversationId: _conversationId ?? '',
-        history: history,
-      );
+      final userJson = jsonDecode(userStr) as Map<String, dynamic>;
+      final userId = userJson['id'] as int;
+      await _aiWsService.connect(userId);
       if (!mounted) return;
+      _aiWsService.messages.listen(_handleWsMessage);
       setState(() {
-        _conversationId = res.conversationId;
-        _lastResponse = res;
-        _messages.add(AiChatMessage(role: 'assistant', content: res.answer));
-        _status = AiStatus.idle;
-        _isSending = false;
+        _isConnecting = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
-        _status = AiStatus.idle;
-        _isSending = false;
+        _isConnecting = false;
+        _error = 'Khong the ket noi AI: $e';
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Loi: $e')),
-      );
-    } finally {
-      if (mounted) {
-        _scrollToBottom();
-      }
     }
   }
+
+  void _handleWsMessage(AiWsMessage msg) {
+    if (!mounted) return;
+    switch (msg.type) {
+      case 'status':
+        setState(() {
+          _status = _parseStatus(msg.content ?? '');
+        });
+        break;
+      case 'delta':
+        setState(() {
+          if (_messages.isEmpty || _messages.last.role == 'user') {
+            _messages.add(AiChatMessage(role: 'assistant', content: msg.content ?? ''));
+          } else {
+            final last = _messages.last;
+            _messages[_messages.length - 1] = AiChatMessage(
+              role: last.role,
+              content: last.content + (msg.content ?? ''),
+            );
+          }
+          _scrollToBottom();
+        });
+        break;
+      case 'sources':
+        setState(() {
+          _sources = msg.sources ?? [];
+        });
+        break;
+      case 'done':
+        setState(() {
+          _status = AiStatus.idle;
+          _isSending = false;
+        });
+        break;
+      case 'error':
+        setState(() {
+          _status = AiStatus.idle;
+          _isSending = false;
+          _error = msg.error ?? 'Loi khong xac dinh';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg.error ?? 'Loi khong xac dinh')),
+        );
+        break;
+      case 'pong':
+        break;
+    }
+  }
+
+  AiStatus _parseStatus(String content) {
+    if (content.contains('suy nghi')) return AiStatus.thinking;
+    if (content.contains('tim kiem')) return AiStatus.searching;
+    if (content.contains('tong hop')) return AiStatus.synthesizing;
+    return AiStatus.idle;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _scrollController.dispose();
+    _aiWsService.disconnect();
+    super.dispose();
+  }
+
+  Future<void> _sendMessage() async {
+    final text = _controller.text.trim();
+    if (text.isEmpty || _isSending || !_aiWsService.isConnected) return;
+    setState(() {
+      _messages.add(AiChatMessage(role: 'user', content: text));
+      _controller.clear();
+      _isSending = true;
+      _status = AiStatus.thinking;
+      _error = null;
+    });
+    _scrollToBottom();
+    _aiWsService.sendMessage(text);
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -92,6 +146,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
       }
     });
   }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -102,6 +157,10 @@ class _AiChatScreenState extends State<AiChatScreen> {
       ),
       body: Column(
         children: [
+          if (_isConnecting)
+            const LinearProgressIndicator(),
+          if (_isConnecting)
+            const SizedBox(height: 4),
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
@@ -109,12 +168,18 @@ class _AiChatScreenState extends State<AiChatScreen> {
               itemCount: _messages.length,
               itemBuilder: (context, index) {
                 final m = _messages[index];
-                return AiMessageBubble(message: m, isUser: m.role == 'user');
+                final isLast = index == _messages.length - 1;
+                final isStreaming = isLast && m.role == 'assistant' && _isSending;
+                return AiStreamingBubble(
+                  content: m.content,
+                  isUser: m.role == 'user',
+                  isStreaming: isStreaming,
+                );
               },
             ),
           ),
           if (_status != AiStatus.idle) AiStatusIndicator(status: _status),
-          if (_hasSearchSources) ...[
+          if (_sources.isNotEmpty) ...[
             const Divider(height: 1),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -129,9 +194,17 @@ class _AiChatScreenState extends State<AiChatScreen> {
               height: 140,
               child: ListView.builder(
                 scrollDirection: Axis.horizontal,
-                itemCount: _lastResponse!.sources.length,
+                itemCount: _sources.length,
                 itemBuilder: (context, index) {
-                  return AiSourceItem(source: _lastResponse!.sources[index]);
+                  return AiSourceItem(
+                    source: AiSource(
+                      title: _sources[index].title,
+                      url: _sources[index].url,
+                      content: _sources[index].content,
+                      score: _sources[index].score,
+                      publishedDate: _sources[index].publishedDate,
+                    ),
+                  );
                 },
               ),
             ),
@@ -143,9 +216,11 @@ class _AiChatScreenState extends State<AiChatScreen> {
                 Expanded(
                   child: TextField(
                     controller: _controller,
-                    enabled: !_isSending,
+                    enabled: !_isSending && _aiWsService.isConnected,
                     decoration: InputDecoration(
-                      hintText: 'Nhap cau hoi...',
+                      hintText: _aiWsService.isConnected
+                          ? 'Nhap cau hoi...'
+                          : 'Dang ket noi...',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
                       ),
@@ -162,7 +237,9 @@ class _AiChatScreenState extends State<AiChatScreen> {
                 const SizedBox(width: 8),
                 Container(
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primary,
+                    color: _aiWsService.isConnected && !_isSending
+                        ? Theme.of(context).colorScheme.primary
+                        : Theme.of(context).colorScheme.primary.withValues(alpha: 0.5),
                     shape: BoxShape.circle,
                   ),
                   child: IconButton(
@@ -176,7 +253,9 @@ class _AiChatScreenState extends State<AiChatScreen> {
                             ),
                           )
                         : const Icon(Icons.send, color: Colors.white),
-                    onPressed: _isSending ? null : _sendMessage,
+                    onPressed: (!_isSending && _aiWsService.isConnected)
+                        ? _sendMessage
+                        : null,
                   ),
                 ),
               ],
