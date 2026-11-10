@@ -1,4 +1,4 @@
 # Changelog
 
 ## AI Chat
-- Ây ai sửa 1 tí.
+- Sửa lại mấy cái string thôi, k có j bất ngờ.

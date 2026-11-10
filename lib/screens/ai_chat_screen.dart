@@ -39,7 +39,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
       final prefs = await AppPreferences.getInstance();
       final userStr = prefs.getString('user');
       if (userStr == null || userStr.isEmpty) {
-        throw Exception('Chua dang nhap. Vui long dang nhap de su dung AI chat.');
+        throw Exception('Đăng nhập đê');
       }
       final userJson = jsonDecode(userStr) as Map<String, dynamic>;
       final userId = userJson['id'] as int;
@@ -53,7 +53,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
       if (!mounted) return;
       setState(() {
         _isConnecting = false;
-        _error = 'Khong the ket noi AI: $e';
+        _error = 'Lỗi rồi: $e';
       });
     }
   }
@@ -95,10 +95,10 @@ class _AiChatScreenState extends State<AiChatScreen> {
         setState(() {
           _status = AiStatus.idle;
           _isSending = false;
-          _error = msg.error ?? 'Loi khong xac dinh';
+          _error = msg.error ?? 'Éo biết lỗi gì';
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(msg.error ?? 'Loi khong xac dinh')),
+          SnackBar(content: Text(msg.error ?? 'Éo biết lỗi gì')),
         );
         break;
       case 'pong':
@@ -107,9 +107,9 @@ class _AiChatScreenState extends State<AiChatScreen> {
   }
 
   AiStatus _parseStatus(String content) {
-    if (content.contains('suy nghi')) return AiStatus.thinking;
-    if (content.contains('tim kiem')) return AiStatus.searching;
-    if (content.contains('tong hop')) return AiStatus.synthesizing;
+    if (content.contains('Nghĩ')) return AiStatus.thinking;
+    if (content.contains('Tìm kiếm')) return AiStatus.searching;
+    if (content.contains('Tổng hợp')) return AiStatus.synthesizing;
     return AiStatus.idle;
   }
 
@@ -184,7 +184,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
               child: Text(
-                'Nguon tham co',
+                'Nguồn',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -219,8 +219,8 @@ class _AiChatScreenState extends State<AiChatScreen> {
                     enabled: !_isSending && _aiWsService.isConnected,
                     decoration: InputDecoration(
                       hintText: _aiWsService.isConnected
-                          ? 'Nhap cau hoi...'
-                          : 'Dang ket noi...',
+                          ? 'Hỏi đê'
+                          : 'Loading đến 99%',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
                       ),
