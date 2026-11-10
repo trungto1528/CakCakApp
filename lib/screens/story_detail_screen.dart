@@ -560,22 +560,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       );
     }
     final coverUrl = story['coverUrl'] ?? '';
-    final isExternal = coverUrl.startsWith('http');
-    final imageUrl = isExternal ? coverUrl : '${ApiConfig.coverImage}/$coverUrl';
-    if (isExternal) {
-      return Image.network(
-        imageUrl,
-        headers: {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'},
-        height: 180,
-        width: 120,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => const SizedBox(
-          width: 120,
-          height: 180,
-          child: Icon(Icons.book, size: 48),
-        ),
-      );
-    }
+    final imageUrl = '${ApiConfig.coverImage}/$coverUrl';
     return CachedNetworkImage(
       imageUrl: imageUrl,
       height: 180,
@@ -584,7 +569,9 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       placeholder: (_, __) => const SizedBox(
         width: 120,
         height: 180,
-        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        child: Center(
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
       ),
       errorWidget: (_, __, ___) => const SizedBox(
         width: 120,

@@ -1151,13 +1151,9 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
       return _coverPlaceholder();
     }
     final String imageUrl;
-    if (cover.startsWith('https://') || cover.startsWith('http://')) {
-      imageUrl = cover;
-    } else {
-      final baseUrl = ApiConfig.coverImage.replaceAll(RegExp(r'/+$'), '');
-      final path = cover.replaceAll(RegExp(r'^/+'), '');
-      imageUrl = '$baseUrl/$path';
-    }
+    final baseUrl = ApiConfig.coverImage.replaceAll(RegExp(r'/+$'), '');
+    final path = cover.replaceAll(RegExp(r'^/+'), '');
+    imageUrl = '$baseUrl/$path';
     return ClipRRect(
       borderRadius: BorderRadius.circular(6),
       child: CachedNetworkImage(

@@ -211,9 +211,7 @@ class _BrowseAllStoriesScreenState extends State<BrowseAllStoriesScreen> {
     final cover = rawCover.trim();
     final imageUrl = cover.isEmpty
         ? ''
-        : (cover.startsWith('http://') || cover.startsWith('https://')
-              ? cover
-              : '${ApiConfig.coverImage}/$cover');
+        : '${ApiConfig.coverImage}/$cover';
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       clipBehavior: Clip.antiAlias,
