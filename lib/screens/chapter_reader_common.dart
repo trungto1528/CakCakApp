@@ -67,6 +67,10 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
 
   final Set<int> _finishedInitialImageIndexes = {};
 
+  // Cache ảnh trong RAM cho toàn bộ chương đang xem để khi lùi lại trang
+  // trong cùng một màn hình đọc không phải tải lại từ mạng/dĩa.
+  final Map<String, ImageProvider> _memoryImageCache = {};
+
   // Tăng mỗi khi mở chương mới hoặc rời màn hình để hủy prefetch cũ.
   int _prefetchGeneration = 0;
 
@@ -649,6 +653,9 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         initialImageCount = 0;
         _finishedInitialImageIndexes.clear();
         allowRemainingImages = true;
+
+        // Xóa cache ảnh RAM của chương cũ để không trùng lẫn khi mở chương mới.
+        _memoryImageCache.clear();
 
         useOfflineImages = offlineImages;
 

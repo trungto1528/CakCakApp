@@ -10,9 +10,9 @@ class ChapterCacheManager {
   static final CacheManager instance = CacheManager(
     Config(
       'chapterImageCache',
-      // Giữ ảnh trong 1 ngày. Mỗi lần mở chương/prefetch sẽ "touch" lại
-      // toàn bộ ảnh của chương nên ảnh đang đọc không bị dọn.
-      stalePeriod: const Duration(days: 1),
+      // Giữ ảnh trong 5 phút. Trong cùng một lần đọc chương (<5 phút),
+      // ảnh đã tải sẽ được phục vụ lại từ đĩa khi lùi lại, không tải lại mạng.
+      stalePeriod: const Duration(minutes: 5),
       maxNrOfCacheObjects: _unlimitedCacheObjects,
     ),
   );
