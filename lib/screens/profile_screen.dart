@@ -32,6 +32,7 @@ class ProfilePage extends StatefulWidget {
 }
 class _ProfilePageState extends State<ProfilePage> {
   User? user;
+  bool _hasUpdate = false;
   @override
   void initState() {
     super.initState();
@@ -39,6 +40,7 @@ class _ProfilePageState extends State<ProfilePage> {
     // Không gọi API khi đang offline.
     if (!OfflineModeService.isOffline.value) {
       _loadUser();
+      _checkOta();
     }
   }
   @override
@@ -78,6 +80,20 @@ class _ProfilePageState extends State<ProfilePage> {
       await prefs.setString('user', jsonEncode(userJson));
     } catch (e) {
       debugPrint('Lỗi tải thông tin user: $e');
+    }
+  }
+
+  Future<void> _checkOta() async {
+    if (isOffline) return;
+    try {
+      final remote = await OtaService().checkUpdate().timeout(const Duration(seconds: 20));
+      if (!mounted) return;
+      final changelogs = remote?['changelogs'] as List?;
+      setState(() {
+        _hasUpdate = (changelogs ?? []).isNotEmpty;
+      });
+    } catch (e) {
+      debugPrint('Lỗi kiểm tra OTA: $e');
     }
   }
   Color _getRoleColor(String role) {
@@ -518,9 +534,36 @@ class _ProfilePageState extends State<ProfilePage> {
         title: Text(isOffline ? 'Truyện offline' : 'Tài khoản'),
         actions: [
           if (!isOffline)
-            IconButton(
-              icon: const Icon(Icons.settings),
-              onPressed: _openSettings,
+            Stack(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.settings),
+                  onPressed: _openSettings,
+                ),
+                if (_hasUpdate)
+                  Positioned(
+                    right: 6,
+                    top: 6,
+                    child: Container(
+                      width: 16,
+                      height: 16,
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Center(
+                        child: Text(
+                          '!',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
         ],
       ),
