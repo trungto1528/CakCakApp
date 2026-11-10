@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
-import '../config/api_config.dart';
 import '../services/app_preference.dart';
 import '../models/ai_ws_message.dart';
 
@@ -20,8 +19,9 @@ class AiWsService {
   Future<void> connect(int userId) async {
     if (_isConnected) return;
 
+    // WebSocket endpoint không có /api prefix
     final uri = Uri.parse(
-      '${ApiConfig.api.replaceFirst('http', 'ws')}/ws/ai/chat?userId=$userId',
+      'ws://vps212.trungto.dpdns.org:7777/ws/ai/chat?userId=$userId',
     );
 
     _channel = WebSocketChannel.connect(uri);

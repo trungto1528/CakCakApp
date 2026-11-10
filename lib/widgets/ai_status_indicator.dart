@@ -7,9 +7,9 @@ class AiStatusIndicator extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = switch (status) {
       AiStatus.idle => '',
-      AiStatus.thinking => 'AI dang suy nghinh...',
-      AiStatus.searching => 'Dang tim kiem Internet...',
-      AiStatus.synthesizing => 'Dang tong hop thong tin...',
+      AiStatus.thinking => 'AI đang load',
+      AiStatus.searching => 'Đang search',
+      AiStatus.synthesizing => 'Đang tổng hợp',
     };
     if (text.isEmpty) {
       return const SizedBox.shrink();
