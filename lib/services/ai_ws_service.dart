@@ -1,3 +1,4 @@
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -20,7 +21,6 @@ class AiWsService {
   bool get isConnected => _isConnected;
   String? get conversationId => _conversationId;
 
-  /// Chuyển lỗi kỹ thuật thành thông báo ngắn gọn cho người dùng.
   static String formatError(
       Object? error, {
         bool connectionError = false,
@@ -41,7 +41,6 @@ class AiWsService {
 
     final lower = raw.toLowerCase();
 
-    // Lỗi kết nối và timeout.
     if (error is SocketException ||
         error is WebSocketException ||
         error is TimeoutException ||
@@ -60,7 +59,6 @@ class AiWsService {
       return 'Máy chủ phản hồi quá lâu. Vui lòng thử lại.';
     }
 
-    // Lỗi API key hoặc quyền truy cập.
     if (lower.contains('401') ||
         lower.contains('403') ||
         lower.contains('unauthorized') ||
@@ -69,7 +67,6 @@ class AiWsService {
       return 'Dịch vụ AI đang gặp lỗi xác thực. Vui lòng thử lại sau.';
     }
 
-    // Rate limit.
     if (lower.contains('429') ||
         lower.contains('rate limit') ||
         lower.contains('too many requests') ||
@@ -77,7 +74,6 @@ class AiWsService {
       return 'Dịch vụ AI đang quá tải. Vui lòng thử lại sau.';
     }
 
-    // Lỗi máy chủ.
     if (RegExp(r'\b5\d{2}\b').hasMatch(raw) ||
         lower.contains('internal server error') ||
         lower.contains('service unavailable') ||
@@ -85,16 +81,13 @@ class AiWsService {
       return 'Máy chủ AI đang gặp sự cố. Vui lòng thử lại sau.';
     }
 
-    // Lỗi dịch vụ tìm kiếm.
     if (lower.contains('tavily')) {
       return 'Không thể tìm kiếm thông tin trên Internet lúc này.';
     }
 
-    // Không hiển thị exception, stack trace hoặc JSON response.
     final firstLine = raw.split(RegExp(r'[\r\n]')).first.trim();
 
-    final looksLikeException =
-    RegExp(
+    final looksLikeException = RegExp(
       r'^(exception|error|runtimeexception|'
       r'illegalstateexception|illegalargumentexception|'
       r'java\.|org\.|com\.|io\.|dart\.)',
@@ -108,7 +101,6 @@ class AiWsService {
       return 'AI không thể xử lý yêu cầu này. Vui lòng thử lại.';
     }
 
-    // Chỉ giữ thông báo ngắn, không đưa nguyên response body lên UI.
     if (firstLine.length > 140) {
       return 'AI không thể xử lý yêu cầu này. Vui lòng thử lại.';
     }
@@ -149,30 +141,49 @@ class AiWsService {
 
   void _onMessage(dynamic data) {
     try {
-      final Map<String, dynamic> json =
-      jsonDecode(data as String) as Map<String, dynamic>;
-
+      final json = jsonDecode(data as String) as Map<String, dynamic>;
       final msg = AiWsMessage.fromJson(json);
 
-      // Không chuyển exception nguyên bản từ backend lên giao diện.
-      if (msg.type == 'error') {
-        final safeMessage = AiWsMessage(
-          type: 'error',
-          conversationId: msg.conversationId,
-          error: formatError(msg.error),
-        );
+      // Cập nhật conversationId ngay khi nhận được bất kỳ sự kiện nào.
+      if (msg.conversationId != null &&
+          msg.conversationId!.trim().isNotEmpty) {
+        _conversationId = msg.conversationId;
+      }
 
-        _messageController.add(safeMessage);
+      // Ghi nhận dữ liệu nhận được để kiểm tra lỗi streaming.
+      final contentLength = msg.content?.length ?? 0;
+
+      print(
+        '[AI WS IN] type=${msg.type} '
+            'conversationId=${msg.conversationId} '
+            'contentLength=$contentLength '
+            'sources=${msg.sources?.length ?? 0}',
+      );
+
+      if (msg.type == 'delta' && contentLength > 0) {
+        print(
+          '[AI WS DELTA] ${msg.content!.substring(
+            0,
+            contentLength > 200 ? 200 : contentLength,
+          )}',
+        );
+      }
+
+      if (msg.type == 'error') {
+        _messageController.add(
+          AiWsMessage(
+            type: 'error',
+            conversationId: msg.conversationId,
+            error: formatError(msg.error),
+          ),
+        );
         return;
       }
 
       _messageController.add(msg);
+    } catch (e) {
+      print('[AI WS PARSE ERROR] $e');
 
-      if (msg.type == 'done') {
-        _conversationId = msg.conversationId;
-      }
-    } catch (_) {
-      // Không in exception hoặc dữ liệu phản hồi lên giao diện.
       _messageController.add(
         AiWsMessage(
           type: 'error',
@@ -185,6 +196,8 @@ class AiWsService {
   void _onError(dynamic error) {
     _isConnected = false;
     _pingTimer?.cancel();
+
+    print('[AI WS ERROR] $error');
 
     _messageController.add(
       AiWsMessage(
@@ -200,6 +213,8 @@ class AiWsService {
   void _onDone() {
     _isConnected = false;
     _pingTimer?.cancel();
+
+    print('[AI WS CLOSED] conversationId=$_conversationId');
   }
 
   void _startPingTimer() {
@@ -223,8 +238,8 @@ class AiWsService {
 
     try {
       _channel!.sink.add(jsonEncode(msg.toJson()));
-    } catch (_) {
-      // Không hiển thị exception nội bộ.
+    } catch (e) {
+      print('[AI WS SEND ERROR] $e');
     }
   }
 

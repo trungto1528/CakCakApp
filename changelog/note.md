@@ -1,4 +1,4 @@
 # Changelog
 
 ## AI Chat
-- Sửa lại mấy cái string thôi, k có j bất ngờ.
+- Sửa AI, giờ là stream, còn đúng sai éo bt, chx kiểm tra lại nó có nhớ context hay không.

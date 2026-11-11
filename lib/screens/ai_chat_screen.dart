@@ -1,3 +1,4 @@
+
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -5,10 +6,8 @@ import 'package:flutter/material.dart';
 import '../services/app_preference.dart';
 import '../services/ai_ws_service.dart';
 import '../models/ai_chat_message.dart';
-import '../models/ai_source.dart';
 import '../models/ai_ws_message.dart';
 import '../widgets/ai_streaming_bubble.dart';
-import '../widgets/ai_source_item.dart';
 import '../widgets/ai_status_indicator.dart';
 
 class AiChatScreen extends StatefulWidget {
@@ -30,6 +29,8 @@ class _AiChatScreenState extends State<AiChatScreen> {
   bool _isConnecting = false;
 
   AiStatus _status = AiStatus.idle;
+
+  // Danh sách nguồn tạm thời của câu trả lời đang được tạo.
   List<AiWsSource> _sources = [];
 
   @override
@@ -93,17 +94,19 @@ class _AiChatScreenState extends State<AiChatScreen> {
       case 'delta':
         setState(() {
           if (_messages.isEmpty || _messages.last.role == 'user') {
+            // Tạo tin nhắn AI mới và gắn các nguồn đã nhận được.
             _messages.add(
               AiChatMessage(
                 role: 'assistant',
                 content: msg.content ?? '',
+                sources: List<AiWsSource>.from(_sources),
               ),
             );
           } else {
             final last = _messages.last;
 
-            _messages[_messages.length - 1] = AiChatMessage(
-              role: last.role,
+            // Giữ nguyên danh sách nguồn khi nhận thêm nội dung streaming.
+            _messages[_messages.length - 1] = last.copyWith(
               content: last.content + (msg.content ?? ''),
             );
           }
@@ -114,7 +117,19 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
       case 'sources':
         setState(() {
-          _sources = msg.sources ?? [];
+          _sources = List<AiWsSource>.from(msg.sources ?? []);
+
+          // Nếu tin nhắn AI đã tồn tại, cập nhật nguồn trực tiếp vào nó.
+          // Nếu chưa có delta, nguồn sẽ được gắn khi delta đầu tiên đến.
+          if (_messages.isNotEmpty &&
+              _messages.last.role == 'assistant' &&
+              _isSending) {
+            final last = _messages.last;
+
+            _messages[_messages.length - 1] = last.copyWith(
+              sources: List<AiWsSource>.from(_sources),
+            );
+          }
         });
         break;
 
@@ -188,6 +203,8 @@ class _AiChatScreenState extends State<AiChatScreen> {
       _isSending = true;
       _status = AiStatus.thinking;
       _error = null;
+
+      // Không dùng nguồn của câu trả lời trước cho câu hỏi mới.
       _sources = [];
     });
 
@@ -237,6 +254,9 @@ class _AiChatScreenState extends State<AiChatScreen> {
                   content: message.content,
                   isUser: message.role == 'user',
                   isStreaming: isStreaming,
+
+                  // Truyền nguồn của đúng tin nhắn AI.
+                  sources: message.sources,
                 );
               },
             ),
@@ -245,41 +265,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
           if (_status != AiStatus.idle)
             AiStatusIndicator(status: _status),
 
-          if (_sources.isNotEmpty) ...[
-            const Divider(height: 1),
-
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 6,
-              ),
-              child: Text(
-                'Nguồn',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-
-            SizedBox(
-              height: 140,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                itemCount: _sources.length,
-                itemBuilder: (context, index) {
-                  return AiSourceItem(
-                    source: AiSource(
-                      title: _sources[index].title,
-                      url: _sources[index].url,
-                      content: _sources[index].content,
-                      score: _sources[index].score,
-                      publishedDate: _sources[index].publishedDate,
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
+          // Không còn danh sách nguồn riêng ở phía dưới câu trả lời.
 
           Padding(
             padding: const EdgeInsets.all(8),
