@@ -30,7 +30,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
   AiStatus _status = AiStatus.idle;
 
-  // Danh sách nguồn tạm thời của câu trả lời đang được tạo.
+  // Vẫn nhận và lưu nguồn từ backend, nhưng tạm thời không hiển thị.
   List<AiWsSource> _sources = [];
 
   @override
@@ -94,7 +94,6 @@ class _AiChatScreenState extends State<AiChatScreen> {
       case 'delta':
         setState(() {
           if (_messages.isEmpty || _messages.last.role == 'user') {
-            // Tạo tin nhắn AI mới và gắn các nguồn đã nhận được.
             _messages.add(
               AiChatMessage(
                 role: 'assistant',
@@ -105,7 +104,6 @@ class _AiChatScreenState extends State<AiChatScreen> {
           } else {
             final last = _messages.last;
 
-            // Giữ nguyên danh sách nguồn khi nhận thêm nội dung streaming.
             _messages[_messages.length - 1] = last.copyWith(
               content: last.content + (msg.content ?? ''),
             );
@@ -117,10 +115,9 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
       case 'sources':
         setState(() {
+          // Tiếp tục nhận và lưu nguồn, chưa hiển thị trên giao diện.
           _sources = List<AiWsSource>.from(msg.sources ?? []);
 
-          // Nếu tin nhắn AI đã tồn tại, cập nhật nguồn trực tiếp vào nó.
-          // Nếu chưa có delta, nguồn sẽ được gắn khi delta đầu tiên đến.
           if (_messages.isNotEmpty &&
               _messages.last.role == 'assistant' &&
               _isSending) {
@@ -254,9 +251,6 @@ class _AiChatScreenState extends State<AiChatScreen> {
                   content: message.content,
                   isUser: message.role == 'user',
                   isStreaming: isStreaming,
-
-                  // Truyền nguồn của đúng tin nhắn AI.
-                  sources: message.sources,
                 );
               },
             ),
@@ -264,8 +258,6 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
           if (_status != AiStatus.idle)
             AiStatusIndicator(status: _status),
-
-          // Không còn danh sách nguồn riêng ở phía dưới câu trả lời.
 
           Padding(
             padding: const EdgeInsets.all(8),
