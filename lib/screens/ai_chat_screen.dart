@@ -1,6 +1,7 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
-import '../config/api_config.dart';
+
 import '../services/app_preference.dart';
 import '../services/ai_ws_service.dart';
 import '../models/ai_chat_message.dart';
@@ -12,6 +13,7 @@ import '../widgets/ai_status_indicator.dart';
 
 class AiChatScreen extends StatefulWidget {
   const AiChatScreen({super.key});
+
   @override
   State<AiChatScreen> createState() => _AiChatScreenState();
 }
@@ -20,10 +22,13 @@ class _AiChatScreenState extends State<AiChatScreen> {
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
   final _aiWsService = AiWsService();
+
   final List<AiChatMessage> _messages = [];
+
   bool _isSending = false;
   String? _error;
   bool _isConnecting = false;
+
   AiStatus _status = AiStatus.idle;
   List<AiWsSource> _sources = [];
 
@@ -34,73 +39,112 @@ class _AiChatScreenState extends State<AiChatScreen> {
   }
 
   Future<void> _connect() async {
-    setState(() => _isConnecting = true);
+    if (!mounted) return;
+
+    setState(() {
+      _isConnecting = true;
+      _error = null;
+    });
+
     try {
       final prefs = await AppPreferences.getInstance();
       final userStr = prefs.getString('user');
+
       if (userStr == null || userStr.isEmpty) {
-        throw Exception('Đăng nhập đê');
+        throw Exception('Vui lòng đăng nhập để sử dụng AI.');
       }
+
       final userJson = jsonDecode(userStr) as Map<String, dynamic>;
       final userId = userJson['id'] as int;
+
       await _aiWsService.connect(userId);
+
       if (!mounted) return;
+
       _aiWsService.messages.listen(_handleWsMessage);
+
       setState(() {
         _isConnecting = false;
+        _error = null;
       });
     } catch (e) {
       if (!mounted) return;
+
       setState(() {
         _isConnecting = false;
-        _error = 'Lỗi rồi: $e';
+        _error = AiWsService.formatError(
+          e,
+          connectionError: true,
+        );
       });
     }
   }
 
   void _handleWsMessage(AiWsMessage msg) {
     if (!mounted) return;
+
     switch (msg.type) {
       case 'status':
         setState(() {
           _status = _parseStatus(msg.content ?? '');
         });
         break;
+
       case 'delta':
         setState(() {
           if (_messages.isEmpty || _messages.last.role == 'user') {
-            _messages.add(AiChatMessage(role: 'assistant', content: msg.content ?? ''));
+            _messages.add(
+              AiChatMessage(
+                role: 'assistant',
+                content: msg.content ?? '',
+              ),
+            );
           } else {
             final last = _messages.last;
+
             _messages[_messages.length - 1] = AiChatMessage(
               role: last.role,
               content: last.content + (msg.content ?? ''),
             );
           }
+
           _scrollToBottom();
         });
         break;
+
       case 'sources':
         setState(() {
           _sources = msg.sources ?? [];
         });
         break;
+
       case 'done':
         setState(() {
           _status = AiStatus.idle;
           _isSending = false;
+          _error = null;
         });
         break;
+
       case 'error':
+        final safeError = AiWsService.formatError(msg.error);
+
         setState(() {
           _status = AiStatus.idle;
           _isSending = false;
-          _error = msg.error ?? 'Éo biết lỗi gì';
+          _error = safeError;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(msg.error ?? 'Éo biết lỗi gì')),
-        );
+
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(safeError),
+              duration: const Duration(seconds: 4),
+            ),
+          );
         break;
+
       case 'pong':
         break;
     }
@@ -110,6 +154,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
     if (content.contains('Nghĩ')) return AiStatus.thinking;
     if (content.contains('Tìm kiếm')) return AiStatus.searching;
     if (content.contains('Tổng hợp')) return AiStatus.synthesizing;
+
     return AiStatus.idle;
   }
 
@@ -118,32 +163,47 @@ class _AiChatScreenState extends State<AiChatScreen> {
     _controller.dispose();
     _scrollController.dispose();
     _aiWsService.disconnect();
+
     super.dispose();
   }
 
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
-    if (text.isEmpty || _isSending || !_aiWsService.isConnected) return;
+
+    if (text.isEmpty ||
+        _isSending ||
+        !_aiWsService.isConnected) {
+      return;
+    }
+
     setState(() {
-      _messages.add(AiChatMessage(role: 'user', content: text));
+      _messages.add(
+        AiChatMessage(
+          role: 'user',
+          content: text,
+        ),
+      );
+
       _controller.clear();
       _isSending = true;
       _status = AiStatus.thinking;
       _error = null;
+      _sources = [];
     });
+
     _scrollToBottom();
     _aiWsService.sendMessage(text);
   }
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
+      if (!_scrollController.hasClients) return;
+
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
     });
   }
 
@@ -157,39 +217,50 @@ class _AiChatScreenState extends State<AiChatScreen> {
       ),
       body: Column(
         children: [
-          if (_isConnecting)
-            const LinearProgressIndicator(),
-          if (_isConnecting)
-            const SizedBox(height: 4),
+          if (_isConnecting) const LinearProgressIndicator(),
+          if (_isConnecting) const SizedBox(height: 4),
+
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.symmetric(vertical: 8),
               itemCount: _messages.length,
               itemBuilder: (context, index) {
-                final m = _messages[index];
+                final message = _messages[index];
                 final isLast = index == _messages.length - 1;
-                final isStreaming = isLast && m.role == 'assistant' && _isSending;
+
+                final isStreaming = isLast &&
+                    message.role == 'assistant' &&
+                    _isSending;
+
                 return AiStreamingBubble(
-                  content: m.content,
-                  isUser: m.role == 'user',
+                  content: message.content,
+                  isUser: message.role == 'user',
                   isStreaming: isStreaming,
                 );
               },
             ),
           ),
-          if (_status != AiStatus.idle) AiStatusIndicator(status: _status),
+
+          if (_status != AiStatus.idle)
+            AiStatusIndicator(status: _status),
+
           if (_sources.isNotEmpty) ...[
             const Divider(height: 1),
+
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 6,
+              ),
               child: Text(
                 'Nguồn',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
+
             SizedBox(
               height: 140,
               child: ListView.builder(
@@ -209,6 +280,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
               ),
             ),
           ],
+
           Padding(
             padding: const EdgeInsets.all(8),
             child: Row(
@@ -220,7 +292,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
                     decoration: InputDecoration(
                       hintText: _aiWsService.isConnected
                           ? 'Hỏi đê'
-                          : 'Loading đến 99%',
+                          : 'Không thể kết nối máy chủ',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
                       ),
@@ -234,25 +306,33 @@ class _AiChatScreenState extends State<AiChatScreen> {
                     onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
+
                 const SizedBox(width: 8),
+
                 Container(
                   decoration: BoxDecoration(
                     color: _aiWsService.isConnected && !_isSending
                         ? Theme.of(context).colorScheme.primary
-                        : Theme.of(context).colorScheme.primary.withValues(alpha: 0.5),
+                        : Theme.of(context)
+                        .colorScheme
+                        .primary
+                        .withValues(alpha: 0.5),
                     shape: BoxShape.circle,
                   ),
                   child: IconButton(
                     icon: _isSending
                         ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.send, color: Colors.white),
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                        : const Icon(
+                      Icons.send,
+                      color: Colors.white,
+                    ),
                     onPressed: (!_isSending && _aiWsService.isConnected)
                         ? _sendMessage
                         : null,
@@ -261,12 +341,33 @@ class _AiChatScreenState extends State<AiChatScreen> {
               ],
             ),
           ),
+
           if (_error != null)
             Padding(
-              padding: const EdgeInsets.all(12),
-              child: Text(
-                _error!,
-                style: const TextStyle(color: Colors.red),
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.error_outline,
+                    color: Colors.red,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _error!,
+                      style: const TextStyle(
+                        color: Colors.red,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                  if (!_aiWsService.isConnected)
+                    TextButton(
+                      onPressed: _isConnecting ? null : _connect,
+                      child: const Text('Thử lại'),
+                    ),
+                ],
               ),
             ),
         ],
