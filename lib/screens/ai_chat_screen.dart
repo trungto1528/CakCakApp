@@ -2,6 +2,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../services/app_preference.dart';
 import '../services/ai_ws_service.dart';
@@ -86,13 +87,22 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
     switch (msg.type) {
       case 'status':
+        final newStatus = _parseStatus(msg.content ?? '');
+
+        debugPrint(
+          '[AI STATUS] content="${msg.content}" mapped=$newStatus',
+        );
+
         setState(() {
-          _status = _parseStatus(msg.content ?? '');
+          _status = newStatus;
         });
         break;
 
       case 'delta':
         setState(() {
+          // Khi AI bắt đầu trả lời, ẩn trạng thái xử lý.
+          _status = AiStatus.idle;
+
           if (_messages.isEmpty || _messages.last.role == 'user') {
             _messages.add(
               AiChatMessage(
@@ -163,11 +173,46 @@ class _AiChatScreenState extends State<AiChatScreen> {
   }
 
   AiStatus _parseStatus(String content) {
-    if (content.contains('Nghĩ')) return AiStatus.thinking;
-    if (content.contains('Tìm kiếm')) return AiStatus.searching;
-    if (content.contains('Tổng hợp')) return AiStatus.synthesizing;
+    // Chuyển về chữ thường để tránh lỗi phân biệt chữ hoa/chữ thường.
+    final normalized = content.trim().toLowerCase();
 
-    return AiStatus.idle;
+    if (normalized.isEmpty) {
+      return AiStatus.thinking;
+    }
+
+    // Đang tìm kiếm Internet hoặc đọc nội dung nguồn.
+    if (normalized.contains('tìm kiếm') ||
+        normalized.contains('tim kiem') ||
+        normalized.contains('kiểm chứng') ||
+        normalized.contains('kiem chung') ||
+        normalized.contains('đọc') ||
+        normalized.contains('doc') ||
+        normalized.contains('extract')) {
+      return AiStatus.searching;
+    }
+
+    // Đang tổng hợp câu trả lời.
+    if (normalized.contains('tổng hợp') ||
+        normalized.contains('tong hop') ||
+        normalized.contains('tạo câu trả lời') ||
+        normalized.contains('tao cau tra loi')) {
+      return AiStatus.synthesizing;
+    }
+
+    // Đang phân tích, khởi tạo agent hoặc thử lại.
+    if (normalized.contains('phân tích') ||
+        normalized.contains('phan tich') ||
+        normalized.contains('khởi tạo') ||
+        normalized.contains('khoi tao') ||
+        normalized.contains('đang thử lại') ||
+        normalized.contains('dang thu lai') ||
+        normalized.contains('nghĩ') ||
+        normalized.contains('thinking')) {
+      return AiStatus.thinking;
+    }
+
+    // Status mới chưa được phân loại vẫn phải hiển thị trạng thái xử lý.
+    return AiStatus.thinking;
   }
 
   @override
@@ -211,7 +256,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
+      if (!mounted || !_scrollController.hasClients) return;
 
       _scrollController.animateTo(
         _scrollController.position.maxScrollExtent,
@@ -249,6 +294,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
                 return AiStreamingBubble(
                   content: message.content,
+                  sources: message.sources,
                   isUser: message.role == 'user',
                   isStreaming: isStreaming,
                 );
@@ -264,24 +310,35 @@ class _AiChatScreenState extends State<AiChatScreen> {
             child: Row(
               children: [
                 Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    enabled: !_isSending && _aiWsService.isConnected,
-                    decoration: InputDecoration(
-                      hintText: _aiWsService.isConnected
-                          ? 'Hỏi đê'
-                          : 'Không thể kết nối máy chủ',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
+                  child: Focus(
+                    onKeyEvent: (node, event) {
+                      if (event is KeyDownEvent &&
+                          event.logicalKey == LogicalKeyboardKey.enter &&
+                          !HardwareKeyboard.instance.isShiftPressed) {
+                        _sendMessage();
+                        return KeyEventResult.handled;
+                      }
+                      return KeyEventResult.ignored;
+                    },
+                    child: TextField(
+                      controller: _controller,
+                      enabled: !_isSending && _aiWsService.isConnected,
+                      decoration: InputDecoration(
+                        hintText: _aiWsService.isConnected
+                            ? 'Hỏi đê'
+                            : 'Không thể kết nối máy chủ',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
                       ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
+                      maxLines: null,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => _sendMessage(),
                     ),
-                    maxLines: null,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
 

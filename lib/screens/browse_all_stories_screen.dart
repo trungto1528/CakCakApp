@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:novel_app/config/api_config.dart';
 import 'package:novel_app/screens/story_detail_screen.dart';
+import 'package:novel_app/services/cover_cache_manager.dart';
 import 'package:novel_app/services/story_fetcher.dart';
 class BrowseAllStoriesScreen extends StatefulWidget {
   const BrowseAllStoriesScreen({super.key});
@@ -222,6 +223,7 @@ class _BrowseAllStoriesScreenState extends State<BrowseAllStoriesScreen> {
           child: imageUrl.isEmpty
               ? const SizedBox(width: 60, height: 80, child: Icon(Icons.book))
               : CachedNetworkImage(
+                  cacheManager: CoverCacheManager.instance,
                   imageUrl: imageUrl,
                   width: 60,
                   height: 80,

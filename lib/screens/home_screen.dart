@@ -10,6 +10,7 @@ import 'package:novel_app/screens/search_screen.dart';
 import 'package:novel_app/screens/story_detail_screen.dart';
 import 'package:novel_app/services/chapter_fetcher.dart';
 import 'package:novel_app/services/story_fetcher.dart';
+import 'package:novel_app/services/cover_cache_manager.dart';
 import 'package:path_provider/path_provider.dart';
 import '../config/api_config.dart';
 import '../models/User.dart';
@@ -634,6 +635,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: CachedNetworkImage(
+                        cacheManager: CoverCacheManager.instance,
                         imageUrl: '${ApiConfig.coverImage}/$coverUrl',
                         width: 80,
                         height: 110,
@@ -781,6 +783,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
         leading: ClipRRect(
           borderRadius: BorderRadius.circular(6),
           child: CachedNetworkImage(
+            cacheManager: CoverCacheManager.instance,
             imageUrl: '${ApiConfig.coverImage}/$cover',
             width: 60,
             height: 80,
@@ -830,6 +833,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
               ClipRRect(
                 borderRadius: BorderRadius.circular(6),
                 child: CachedNetworkImage(
+                  cacheManager: CoverCacheManager.instance,
                   imageUrl: '${ApiConfig.coverImage}/$cover',
                   width: 80,
                   height: 110,

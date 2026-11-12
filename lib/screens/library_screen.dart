@@ -1,11 +1,14 @@
 import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:novel_app/config/api_config.dart';
 import 'package:novel_app/offline/service/offline_mode_service.dart';
-import 'package:novel_app/screens/story_detail_screen.dart';
+import 'package:novel_app/screens/chapter_reader_screen.dart';
+import 'package:novel_app/screens/chapter_reader_windows.dart';
 import 'package:novel_app/services/reading_list.dart';
 import 'package:novel_app/services/story_fetcher.dart';
+import 'package:novel_app/services/cover_cache_manager.dart';
 import '../models/Story.dart';
 import '../models/User.dart';
 import '../services/app_preference.dart';
@@ -148,13 +151,30 @@ class _LibraryPageState extends State<LibraryPage> {
               final s = Story.fromJson(data);
               return InkWell(
                 borderRadius: BorderRadius.circular(8),
-                onTap: () {
-                  Navigator.push(
+                onTap: () async {
+                  final chapterId =
+                      (chapterInfo['chapterId'] as num?)?.toInt() ?? 0;
+                  final source = '';
+                  final isWindows =
+                      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+                  await Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => StoryDetailScreen(storyId: s.id),
+                      builder: (_) => isWindows
+                          ? ChapterReaderWindowsScreen(
+                              chapterId: chapterId,
+                              storyId: storyId,
+                              source: source,
+                            )
+                          : ChapterReaderScreen(
+                              chapterId: chapterId,
+                              storyId: storyId,
+                              source: source,
+                            ),
                     ),
                   );
+                  if (!mounted) return;
+                  _loadLibrary();
                 },
                 child: Container(
                   padding: EdgeInsets.all(8),
@@ -162,13 +182,14 @@ class _LibraryPageState extends State<LibraryPage> {
                     children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(8),
-                        child: CachedNetworkImage(
-                          width: 70,
-                          height: 105,
-                          fit: BoxFit.cover,
-                          imageUrl:
-                              "${ApiConfig.coverImage}/${s.coverUrl}",
-                        ),
+                      child: CachedNetworkImage(
+                        cacheManager: CoverCacheManager.instance,
+                        width: 70,
+                        height: 105,
+                        fit: BoxFit.cover,
+                        imageUrl:
+                            "${ApiConfig.coverImage}/${s.coverUrl}",
+                      ),
                       ),
                       SizedBox(width: 12),
                       Expanded(

@@ -96,7 +96,7 @@ class StoryFetcher {
   ///
   /// Offline: chỉ tìm trong các truyện đã tải hoàn chỉnh.
   /// Online: tìm kiếm trên server.
-  Future<List> search(String keyword, {List<String>? genres}) async {
+  Future<List> search(String keyword, {List<String>? genres, String? author}) async {
     if (OfflineModeService.isOffline.value) {
       return OfflineEntryService.instance.searchStories(keyword);
     }
@@ -112,6 +112,10 @@ class StoryFetcher {
           query.add('genre=${Uri.encodeQueryComponent(trimmed)}');
         }
       }
+    }
+    final auth = author?.trim();
+    if (auth != null && auth.isNotEmpty) {
+      query.add('author=${Uri.encodeQueryComponent(auth)}');
     }
     final url = '${ApiConfig.api}/stories/search'
         '${query.isEmpty ? '' : '?${query.join('&')}'}';

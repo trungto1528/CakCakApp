@@ -859,21 +859,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                 ),
               ],
 
-              // Các tên khác: Synonyms, English Title, Japanese Title (mỗi tên một dòng).
-              if (altNameEntries.isNotEmpty) ...[
-                for (final entry in altNameEntries)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: _buildMalMetadataRow(
-                      icon: Icons.title,
-                      label: entry.key,
-                      value: entry.value,
-                    ),
-                  ),
-              ],
-
-              // English Title / Japanese Title đã nằm trong "Các tên khác".
-
               // Type and status.
               if (type.isNotEmpty || status.isNotEmpty) ...[
                 const SizedBox(height: 10),
@@ -978,6 +963,33 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                     ],
                   ),
                 ],
+
+              // Các tên khác: Synonyms, English Title, Japanese Title trong 1 thẻ mở rộng.
+              if (altNameEntries.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                ExpansionTile(
+                  title: const Text(
+                    'Các tên khác',
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                  ),
+                  leading: const Icon(Icons.title, size: 18),
+                  initiallyExpanded: false,
+                  children: [
+                    for (final entry in altNameEntries)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 6,
+                        ),
+                        child: _buildMalMetadataRow(
+                          icon: Icons.title,
+                          label: entry.key,
+                          value: entry.value,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
