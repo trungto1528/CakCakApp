@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -15,12 +17,16 @@ import 'package:novel_app/services/app_preference.dart';
 import 'package:novel_app/services/story_fetcher.dart';
 import 'package:novel_app/widget/expand_text.dart';
 import 'package:path_provider/path_provider.dart';
+
 class StoryDetailScreen extends StatefulWidget {
   final int storyId;
+
   const StoryDetailScreen({super.key, required this.storyId});
+
   @override
   State<StoryDetailScreen> createState() => _StoryDetailScreenState();
 }
+
 class _StoryDetailScreenState extends State<StoryDetailScreen> {
   Map<String, dynamic> story = {};
   bool storyLoading = true;
@@ -33,17 +39,28 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
   late final ValueNotifier<StoryDownloadProgress> _downloadNotifier;
   List<dynamic> chapters = [];
   String? _selectedChapterSource;
+  bool _sortDescending = true;
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+  Timer? _searchDebounce;
+  String _searchQuery = '';
+  bool _searchExpanded = false;
   static const int _pageSize = 20;
   int _currentPage = 0;
+
   bool get _isOffline => OfflineModeService.isOffline.value;
+
   bool get _isDownloadPaused {
     final progress = _downloadNotifier.value;
     return progress.isPaused ||
         StoryDownloadService.instance.isPaused(widget.storyId);
   }
+
   @override
   void initState() {
     super.initState();
+    _searchFocusNode.addListener(_onSearchFocusChanged);
+    _searchController.addListener(_onSearchTextChanged);
     _downloadNotifier = StoryDownloadService.instance.progressFor(
       widget.storyId,
     );
@@ -51,16 +68,22 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     _syncDownloadProgress();
     init();
   }
+
   @override
   void dispose() {
     _downloadNotifier.removeListener(_onDownloadProgressChanged);
+    _searchController.dispose();
+    _searchFocusNode.dispose();
+    _searchDebounce?.cancel();
     super.dispose();
   }
+
   void _onDownloadProgressChanged() {
     if (mounted) {
       _syncDownloadProgress();
     }
   }
+
   void _syncDownloadProgress() {
     if (!mounted) return;
     final progress = _downloadNotifier.value;
@@ -75,11 +98,37 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       }
     });
   }
+
+  void _onSearchFocusChanged() {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        setState(() {
+          _searchExpanded =
+              _searchFocusNode.hasFocus || _searchController.text.isNotEmpty;
+        });
+      }
+    });
+  }
+
+  void _onSearchTextChanged() {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        setState(() {
+          _searchExpanded =
+              _searchFocusNode.hasFocus || _searchController.text.isNotEmpty;
+        });
+      }
+    });
+  }
+
   Future<void> init() async {
     await _loadStory();
     if (!mounted) return;
     await _checkDownloaded();
   }
+
   // ============================================================
   // OFFLINE FILES
   // ============================================================
@@ -87,10 +136,11 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     final appDirectory = await getApplicationSupportDirectory();
     return Directory(
       '${appDirectory.path}${Platform.pathSeparator}'
-      'offline_stories${Platform.pathSeparator}'
-      '${widget.storyId}',
+          'offline_stories${Platform.pathSeparator}'
+          '${widget.storyId}',
     );
   }
+
   Future<Map<String, dynamic>> _readOfflineMetadata() async {
     final directory = await _getOfflineStoryDirectory();
     final completeFile = File(
@@ -114,12 +164,13 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     }
     return Map<String, dynamic>.from(metadataJson);
   }
+
   Future<File?> _findOfflineCover() async {
     final directory = await _getOfflineStoryDirectory();
     final possibleDirectories = [
       Directory(
         '${directory.path}${Platform.pathSeparator}'
-        'images${Platform.pathSeparator}cover',
+            'images${Platform.pathSeparator}cover',
       ),
       Directory('${directory.path}${Platform.pathSeparator}cover'),
     ];
@@ -143,12 +194,14 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     }
     return null;
   }
+
   String _fileExtension(String path) {
     final name = path.split(Platform.pathSeparator).last;
     final dotIndex = name.lastIndexOf('.');
     if (dotIndex < 0) return '';
     return name.substring(dotIndex).toLowerCase();
   }
+
   Future<void> _loadOfflineStory() async {
     final data = await _readOfflineMetadata();
     final rawChapters = data['chapters'];
@@ -165,6 +218,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       storyLoading = false;
     });
   }
+
   // ============================================================
   // LOAD STORY
   // ============================================================
@@ -185,7 +239,10 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       } catch (_) {
         // Không có user đã đăng nhập, vẫn tải truyện mà không truyền userId.
       }
-      final data = await StoryFetcher().fetchStory(widget.storyId, userId: userId);
+      final data = await StoryFetcher().fetchStory(
+        widget.storyId,
+        userId: userId,
+      );
       if (!mounted) return;
       setState(() {
         story = Map<String, dynamic>.from(data);
@@ -211,6 +268,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       );
     }
   }
+
   // ============================================================
   // DOWNLOAD, PAUSE, RESUME, CANCEL AND DELETE
   // ============================================================
@@ -231,6 +289,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       debugPrint('Lỗi kiểm tra truyện đã tải: $e');
     }
   }
+
   Future<void> _downloadStory() async {
     if (_isOffline) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -251,8 +310,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       return;
     }
     if (downloadActionLoading) return;
-    // Không bật downloadActionLoading trong toàn bộ thời gian tải.
-    // Nếu bật, nút Hủy tải sẽ bị vô hiệu hóa cho đến khi tải kết thúc.
     try {
       await service.downloadStory(
         widget.storyId,
@@ -280,9 +337,9 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
         ).showSnackBar(const SnackBar(content: Text('Tải truyện hoàn tất.')));
       } else if (latest.error != null) {
         debugPrint('Lỗi tải truyện: ${latest.error}');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Tải truyện thất bại.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Tải truyện thất bại.')));
       }
     } catch (e) {
       if (!mounted) return;
@@ -297,14 +354,17 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       }
     }
   }
+
   void _pauseDownload() {
     if (_isOffline) return;
     StoryDownloadService.instance.pauseDownload(widget.storyId);
   }
+
   void _resumeDownload() {
     if (_isOffline) return;
     StoryDownloadService.instance.resumeDownload(widget.storyId);
   }
+
   Future<void> _cancelDownload() async {
     if (_isOffline || downloadActionLoading) return;
     final confirmed = await showDialog<bool>(
@@ -313,7 +373,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
         title: const Text('Hủy tải truyện?'),
         content: const Text(
           'Tác vụ tải sẽ dừng và dữ liệu đã tải sẽ bị xóa. '
-          'Tiến độ tải chưa hoàn tất sẽ không được dùng để đọc offline.',
+              'Tiến độ tải chưa hoàn tất sẽ không được dùng để đọc offline.',
         ),
         actions: [
           TextButton(
@@ -337,9 +397,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       await _checkDownloaded();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Đã hủy tải. Dữ liệu đã tải đã bị xóa.'),
-        ),
+        const SnackBar(content: Text('Đã hủy tải. Dữ liệu đã tải đã bị xóa.')),
       );
     } catch (e) {
       if (!mounted) return;
@@ -355,6 +413,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       }
     }
   }
+
   Future<void> _showDeleteDownloadDialog() async {
     if (_isOffline) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -369,7 +428,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
         const SnackBar(
           content: Text(
             'Không thể xóa khi truyện đang tải hoặc đang tạm dừng. '
-            'Hãy hủy tải trước.',
+                'Hãy hủy tải trước.',
           ),
         ),
       );
@@ -381,7 +440,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
         title: const Text('Xóa bản tải?'),
         content: const Text(
           'Truyện sẽ bị xóa khỏi thiết bị và không thể đọc offline '
-          'cho đến khi tải lại.',
+              'cho đến khi tải lại.',
         ),
         actions: [
           TextButton(
@@ -416,6 +475,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       ).showSnackBar(SnackBar(content: Text('Không thể xóa bản tải: $e')));
     }
   }
+
   // ============================================================
   // CHAPTERS
   // ============================================================
@@ -453,7 +513,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     return {for (final number in keys) number: result[number]!};
   }
 
-  /// Danh sách tên nguồn (dùng cho dropdown lọc).
   List<String> get chapterSources {
     final sources = <String>{};
     for (final chapter in chapters) {
@@ -463,16 +522,26 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     return sources.toList()..sort();
   }
 
-  /// Chương đã lọc theo nguồn đã chọn (null = tất cả nguồn).
   List<dynamic> get filteredChapters {
-    if (_selectedChapterSource == null) return chapters;
-    return chapters.where((chapter) {
-      if (chapter is! Map) return false;
-      return chapter['createdBy']?.toString() == _selectedChapterSource;
-    }).toList();
+    var result = chapters;
+    if (_selectedChapterSource != null) {
+      result = result.where((chapter) {
+        if (chapter is! Map) return false;
+        return chapter['createdBy']?.toString() == _selectedChapterSource;
+      }).toList();
+    }
+    if (_searchQuery.isNotEmpty) {
+      final query = _searchQuery.toLowerCase();
+      result = result.where((chapter) {
+        if (chapter is! Map) return false;
+        final number = _parseChapterNumber(chapter['chapterNumber']);
+        if (number == null) return false;
+        return _formatChapterNumber(number).toLowerCase().contains(query);
+      }).toList();
+    }
+    return result;
   }
 
-  /// Các nhóm chương theo số chapter sau khi lọc theo nguồn.
   Map<double, List<dynamic>> get filteredGroupedChapters {
     final Map<double, List<dynamic>> result = {};
     for (final chapter in filteredChapters) {
@@ -483,11 +552,13 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       result.putIfAbsent(groupKey, () => []);
       result[groupKey]!.add(chapter);
     }
-    final keys = result.keys.toList()..sort();
+    final keys = result.keys.toList()
+      ..sort((a, b) => _sortDescending ? b.compareTo(a) : a.compareTo(b));
     return {for (final number in keys) number: result[number]!};
   }
 
   int get _totalPages => (filteredGroupedChapters.length / _pageSize).ceil();
+
   Map<double, List<dynamic>> get paginatedChapters {
     final entries = filteredGroupedChapters.entries.toList();
     final start = _currentPage * _pageSize;
@@ -502,10 +573,12 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       _currentPage = 0;
     });
   }
+
   void _goToPage(int page) {
     if (page < 0 || page >= _totalPages) return;
     setState(() => _currentPage = page);
   }
+
   void _openChapter(Map chapter) {
     final chapterId = chapter['id'];
     if (chapterId == null) {
@@ -522,18 +595,19 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       MaterialPageRoute(
         builder: (_) => isWindows
             ? ChapterReaderWindowsScreen(
-                chapterId: chapterId,
-                storyId: widget.storyId,
-                source: source,
-              )
+          chapterId: chapterId,
+          storyId: widget.storyId,
+          source: source,
+        )
             : ChapterReaderScreen(
-                chapterId: chapterId,
-                storyId: widget.storyId,
-                source: source,
-              ),
+          chapterId: chapterId,
+          storyId: widget.storyId,
+          source: source,
+        ),
       ),
     );
   }
+
   // ============================================================
   // STORY INFORMATION
   // ============================================================
@@ -569,9 +643,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       placeholder: (_, __) => const SizedBox(
         width: 120,
         height: 180,
-        child: Center(
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
       ),
       errorWidget: (_, __, ___) => const SizedBox(
         width: 120,
@@ -581,7 +653,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     );
   }
 
-  /// Chuẩn hóa chuỗi để so sánh: bỏ khoảng trắng, ký tự đặc biệt, viết thường.
   String _normalizeLabel(String s) {
     return s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
   }
@@ -716,14 +787,12 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     final synonyms = _infoValue('Synonyms');
     final englishTitle = _infoValue('English Title');
     final japaneseTitle = _infoValue('Japanese Title');
-    // "Các tên khác" gồm Synonyms, English Title, Japanese Title và các locale title
-    // khác từ MangaDex (ví dụ Title (ja-ro), Title (id), ...).
     final altNameEntries = <MapEntry<String, String>>[
       if (synonyms.isNotEmpty) MapEntry('Synonyms', synonyms),
       if (englishTitle.isNotEmpty) MapEntry('English Title', englishTitle),
       if (japaneseTitle.isNotEmpty) MapEntry('Japanese Title', japaneseTitle),
     ];
-    // Thêm các locale title từ metadata provider (label: "{provider}: Title ({locale})").
+
     final infoList = story['information'] is List
         ? story['information'] as List
         : <dynamic>[];
@@ -742,7 +811,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
         altNameEntries.add(MapEntry('Tên ($locale)', value));
       }
 
-      // Fallback: parse JSON từ "{provider}: allTitles" (dùng trong import flow).
       if (label.endsWith(': allTitles') && value.isNotEmpty) {
         try {
           final decoded = jsonDecode(value);
@@ -772,8 +840,8 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     }
 
     detectedProvider ??= MetadataProviderDisplay.fromValue(source);
-    final providerLabel = detectedProvider?.label ??
-        (source.isNotEmpty ? source : '');
+    final providerLabel =
+        detectedProvider?.label ?? (source.isNotEmpty ? source : '');
     final providerColor = detectedProvider?.badgeColor ?? Colors.blue;
     final isMetadataProvider = providerLabel.isNotEmpty || malId.isNotEmpty;
 
@@ -788,26 +856,26 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
             children: [
               Row(
                 mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (isMetadataProvider)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: providerColor.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          providerLabel,
-                          style: TextStyle(
-                            color: providerColor,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                          ),
+                children: [
+                  if (isMetadataProvider)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: providerColor.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        providerLabel,
+                        style: TextStyle(
+                          color: providerColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
+                    ),
                   if (source.isNotEmpty && false)
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -832,24 +900,16 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(
-                          Icons.star,
-                          color: Colors.amber,
-                          size: 17,
-                        ),
+                        const Icon(Icons.star, color: Colors.amber, size: 17),
                         const SizedBox(width: 3),
                         Text(
                           score,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
                 ],
               ),
-
-              // Authors.
               if (authors.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 _buildMalMetadataRow(
@@ -858,8 +918,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                   value: authors,
                 ),
               ],
-
-              // Type and status.
               if (type.isNotEmpty || status.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 Wrap(
@@ -867,8 +925,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                   runSpacing: 8,
                   children: [
                     if (type.isNotEmpty)
-                      _buildMalBadge(
-                          icon: Icons.category_outlined, text: type),
+                      _buildMalBadge(icon: Icons.category_outlined, text: type),
                     if (status.isNotEmpty)
                       _buildMalBadge(
                         icon: Icons.check_circle_outline,
@@ -880,8 +937,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                   ],
                 ),
               ],
-
-              // Genres (tách riêng thành các chip).
               if (genres.isNotEmpty) ...[
                 const SizedBox(height: 16),
                 _buildMalSectionTitle(
@@ -895,20 +950,20 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                   children: genres.map((genre) {
                     return Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .secondaryContainer,
+                        color: Theme.of(context).colorScheme.secondaryContainer,
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
                         genre,
                         style: TextStyle(
                           fontSize: 12,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSecondaryContainer,
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSecondaryContainer,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -916,55 +971,60 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                   }).toList(),
                 ),
               ],
-
-              // MAL ID / URL và nguồn.
-              if (malId.isNotEmpty || malUrl.isNotEmpty || source.isNotEmpty)
-                ...[
-                  const SizedBox(height: 14),
-                  const Divider(height: 1),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      if (malId.isNotEmpty)
-                        Flexible(
-                          child: Text(
-                            '${providerLabel.isNotEmpty ? providerLabel : 'ID'}: $malId',
-                            style: TextStyle(
-                                fontSize: 11, color: Colors.grey[600]),
+              if (malId.isNotEmpty ||
+                  malUrl.isNotEmpty ||
+                  source.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                const Divider(height: 1),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    if (malId.isNotEmpty)
+                      Flexible(
+                        child: Text(
+                          '${providerLabel.isNotEmpty ? providerLabel : 'ID'}: $malId',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[600],
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    const Spacer(),
+                    if (malUrl.isNotEmpty)
+                      Flexible(
+                        child: TextButton.icon(
+                          onPressed: () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('${providerLabel} URL: $malUrl'),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.link, size: 15),
+                          label: Text(
+                            providerLabel.isNotEmpty ? providerLabel : 'Mã',
                             overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                      const Spacer(),
-                      if (malUrl.isNotEmpty)
-                        Flexible(
-                          child: TextButton.icon(
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                      content: Text('${providerLabel} URL: $malUrl')));
-                            },
-                            icon: const Icon(Icons.link, size: 15),
-                            label: Text(providerLabel.isNotEmpty ? providerLabel : 'Mã',
-                                overflow: TextOverflow.ellipsis),
-                            style: TextButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                            ),
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
                           ),
                         ),
-                      if (source.isNotEmpty && malId.isEmpty)
-                        Flexible(
-                          child: Text(
-                            'Nguồn: $source',
-                            style: TextStyle(
-                                fontSize: 11, color: Colors.grey[600]),
-                            overflow: TextOverflow.ellipsis,
+                      ),
+                    if (source.isNotEmpty && malId.isEmpty)
+                      Flexible(
+                        child: Text(
+                          'Nguồn: $source',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[600],
                           ),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                    ],
-                  ),
-                ],
-
-              // Các tên khác: Synonyms, English Title, Japanese Title trong 1 thẻ mở rộng.
+                      ),
+                  ],
+                ),
+              ],
               if (altNameEntries.isNotEmpty) ...[
                 const SizedBox(height: 14),
                 ExpansionTile(
@@ -996,6 +1056,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       ),
     );
   }
+
   Widget _buildStoryInformationContent() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1047,6 +1108,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       ],
     );
   }
+
   // ============================================================
   // CHAPTER LIST UI
   // ============================================================
@@ -1106,8 +1168,14 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       ),
     );
   }
+
   Widget _buildChaptersContent() {
     final paginated = paginatedChapters;
+    final isSearchActive =
+        _searchFocusNode.hasFocus || _searchController.text.isNotEmpty;
+
+    const double controlHeight = 48;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1122,32 +1190,179 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Text(
             '${filteredGroupedChapters.length} nhóm chương · '
-            '${_totalPages == 0 ? 0 : _currentPage + 1}/$_totalPages trang',
+                '${_totalPages == 0 ? 0 : _currentPage + 1}/$_totalPages trang',
             style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
           ),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: DropdownButtonFormField<String?>(
-            decoration: const InputDecoration(
-              labelText: 'Lọc theo nguồn',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            ),
-            value: _selectedChapterSource,
-            items: [
-              const DropdownMenuItem<String?>(
-                value: null,
-                child: Text('Tất cả nguồn'),
-              ),
-              ...chapterSources.map(
-                (source) => DropdownMenuItem<String?>(
-                  value: source,
-                  child: Text(source),
+          child: SizedBox(
+            height: controlHeight,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  flex: isSearchActive ? 7 : 9,
+                  child: Container(
+                    height: controlHeight,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.outline,
+                        width: 1,
+                      ),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String?>(
+                        value: _selectedChapterSource,
+                        isExpanded: true,
+                        isDense: true,
+                        itemHeight: 48,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        borderRadius: BorderRadius.circular(8),
+                        hint: const Text(
+                          'Lọc theo nguồn',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        selectedItemBuilder: (context) {
+                          return [
+                            const Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'Tất cả nguồn',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            ...chapterSources.map(
+                                  (source) => Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  source,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                          ];
+                        },
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text(
+                              'Tất cả nguồn',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          ...chapterSources.map(
+                                (source) => DropdownMenuItem<String?>(
+                              value: source,
+                              child: Text(
+                                source,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ],
+                        onChanged: _onChapterSourceChanged,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            ],
-            onChanged: _onChapterSourceChanged,
+                const SizedBox(width: 8),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeInOut,
+                  width: isSearchActive ? 90 : controlHeight,
+                  height: controlHeight,
+                  child: SizedBox(
+                    height: controlHeight,
+                    child: TextField(
+                      controller: _searchController,
+                      focusNode: _searchFocusNode,
+                      textAlignVertical: TextAlignVertical.center,
+                      keyboardType: TextInputType.number,
+                      maxLines: 1,
+                      decoration: InputDecoration(
+                        border: const OutlineInputBorder(),
+                        enabledBorder: const OutlineInputBorder(),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(
+                            color: Theme.of(context).colorScheme.primary,
+                            width: 2,
+                          ),
+                        ),
+                        isDense: false,
+                        constraints: const BoxConstraints(
+                          minHeight: controlHeight,
+                          maxHeight: controlHeight,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 12,
+                        ),
+                        prefixIconConstraints: const BoxConstraints(
+                          minWidth: controlHeight,
+                          minHeight: controlHeight,
+                        ),
+                        prefixIcon: isSearchActive
+                            ? null
+                            : const Icon(Icons.search, size: 20),
+                      ),
+                      style: const TextStyle(fontSize: 13),
+                      onChanged: (value) {
+                        _searchDebounce?.cancel();
+                        _searchDebounce = Timer(
+                          const Duration(milliseconds: 50),
+                              () {
+                            if (!mounted) return;
+                            setState(() {
+                              _searchQuery = value;
+                              _currentPage = 0;
+                            });
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: controlHeight,
+                  height: controlHeight,
+                  child: IconButton(
+                    tooltip: _sortDescending
+                        ? 'Sắp xếp tăng dần'
+                        : 'Sắp xếp giảm dần',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(
+                      width: controlHeight,
+                      height: controlHeight,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _sortDescending = !_sortDescending;
+                        _currentPage = 0;
+                      });
+                    },
+                    icon: Icon(
+                      _sortDescending
+                          ? Icons.arrow_downward
+                          : Icons.arrow_upward,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    style: IconButton.styleFrom(
+                      backgroundColor: Theme.of(
+                        context,
+                      ).colorScheme.primaryContainer,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
         const SizedBox(height: 8),
@@ -1159,6 +1374,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
         ...paginated.entries.map((entry) {
           final chapterNumber = entry.key;
           final chapterList = entry.value;
+
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1177,8 +1393,10 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                 if (chapter is! Map) {
                   return const SizedBox.shrink();
                 }
+
                 final source = chapter['createdBy']?.toString() ?? '';
                 final isRead = chapter['isRead'] == true;
+
                 return Container(
                   margin: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -1239,6 +1457,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       ],
     );
   }
+
   // ============================================================
   // RESPONSIVE LAYOUT
   // ============================================================
@@ -1278,6 +1497,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       ],
     );
   }
+
   Widget _buildMobileLayout() {
     return RefreshIndicator(
       onRefresh: init,
@@ -1291,6 +1511,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       ),
     );
   }
+
   // ============================================================
   // DOWNLOAD BUTTON AND PROGRESS
   // ============================================================
@@ -1366,18 +1587,19 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
               : _downloadStory,
           icon: downloadActionLoading
               ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
               : Icon(
-                  isDownloaded ? Icons.download_done : Icons.download_outlined,
-                  color: isDownloaded ? Colors.green : null,
-                ),
+            isDownloaded ? Icons.download_done : Icons.download_outlined,
+            color: isDownloaded ? Colors.green : null,
+          ),
         ),
       ],
     );
   }
+
   Widget _buildDownloadProgressBanner() {
     final progress = _downloadNotifier.value;
     final active = StoryDownloadService.instance.isDownloading(widget.storyId);
@@ -1448,6 +1670,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       ),
     );
   }
+
   // ============================================================
   // BUILD
   // ============================================================
@@ -1484,9 +1707,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(story['title']?.toString() ?? ''),
-        actions: [
-          _buildDownloadButton(),
-        ],
+        actions: [_buildDownloadButton()],
       ),
       body: Column(
         children: [
