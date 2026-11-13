@@ -10,12 +10,14 @@ class ChapterReaderScreen extends StatelessWidget {
   final int chapterId;
   final int storyId;
   final String source;
+  final int? startPage;
 
   const ChapterReaderScreen({
     super.key,
     required this.chapterId,
     required this.storyId,
     required this.source,
+    this.startPage,
   });
 
   @override
@@ -28,6 +30,7 @@ class ChapterReaderScreen extends StatelessWidget {
         chapterId: chapterId,
         storyId: storyId,
         source: source,
+        startPage: startPage,
       );
     }
 
@@ -35,6 +38,7 @@ class ChapterReaderScreen extends StatelessWidget {
       chapterId: chapterId,
       storyId: storyId,
       source: source,
+      startPage: startPage,
     );
   }
 }

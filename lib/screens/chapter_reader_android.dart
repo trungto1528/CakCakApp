@@ -5,12 +5,14 @@ class ChapterReaderAndroidScreen extends StatefulWidget {
   final int chapterId;
   final int storyId;
   final String source;
+  final int? startPage;
 
   const ChapterReaderAndroidScreen({
     super.key,
     required this.chapterId,
     required this.storyId,
     required this.source,
+    this.startPage,
   });
 
   @override
@@ -29,6 +31,7 @@ class _ChapterReaderAndroidScreenState
     source = widget.source;
     currentChapterId = widget.chapterId;
     currentSource = widget.source;
+    startPage = widget.startPage;
 
     scrollController.addListener(updateReadingProgress);
     transformController.addListener(onTransformChanged);

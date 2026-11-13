@@ -5,12 +5,14 @@ class ChapterReaderWindowsScreen extends StatefulWidget {
   final int chapterId;
   final int storyId;
   final String source;
+  final int? startPage;
 
   const ChapterReaderWindowsScreen({
     super.key,
     required this.chapterId,
     required this.storyId,
     required this.source,
+    this.startPage,
   });
 
   @override
@@ -29,6 +31,7 @@ class _ChapterReaderWindowsScreenState
     source = widget.source;
     currentChapterId = widget.chapterId;
     currentSource = widget.source;
+    startPage = widget.startPage;
 
     scrollController.addListener(updateReadingProgress);
     transformController.addListener(onTransformChanged);

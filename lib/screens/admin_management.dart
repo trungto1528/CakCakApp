@@ -701,7 +701,7 @@ class _AdminStoryManagerScreenState extends State<AdminStoryManagerScreen> {
                                         ),
                                       ),
                                       Text(
-                                        'Tạo bởi: ${story['createdBy'] ?? 'Unknown'}',
+                                        'Người crawl: ${story['createdByName'] ?? 'Unknown'}',
                                         style: TextStyle(
                                           fontSize: 12,
                                           color: Colors.grey.shade600,

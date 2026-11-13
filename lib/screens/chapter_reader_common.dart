@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -74,6 +75,9 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
   // Tăng mỗi khi mở chương mới hoặc rời màn hình để hủy prefetch cũ.
   int _prefetchGeneration = 0;
 
+  // Debounce lưu tiến độ trang: chờ người đọc dừng vuốt mới gửi lên server.
+  Timer? _pageSaveDebounceTimer;
+
   bool _isCtrlZooming = false;
 
   late int currentChapterId;
@@ -106,6 +110,8 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
 
   int chapterId = 0;
   int storyId = 0;
+
+  int? startPage;
 
   String source = '';
 
@@ -583,6 +589,9 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
 
       if (!mounted) return;
 
+      // Đọc trang đã lưu cho chương này để tiếp tục đọc từ trang dở.
+      final savedPage = await _loadSavedPage(id);
+
       final newBlocks =
       List<dynamic>.from(data['blocks'] ?? []);
 
@@ -645,8 +654,22 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
 
         totalPages = imageCount;
 
+        final defaultPage = openAtLastPage ? imageCount : 1;
+
+        int? initialPage;
+        if (!openAtLastPage) {
+          initialPage = startPage;
+          if (initialPage == null) {
+            initialPage = savedPage;
+          }
+        }
+
         currentPage = imageCount > 0
-            ? (openAtLastPage ? imageCount : 1)
+            ? ((initialPage != null &&
+                    initialPage >= 1 &&
+                    initialPage <= imageCount)
+                ? initialPage
+                : defaultPage)
             : 0;
 
         // Tất cả ảnh của chương được phép tải ngay, không chờ cuộn tới.
@@ -697,26 +720,25 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
           );
         }
 
-        if (scrollController.hasClients) {
+        if (_pageController.hasClients) {
+          final targetPage = (currentPage - 1).clamp(0, totalPages - 1);
+          _pageController.jumpToPage(targetPage);
+        } else if (scrollController.hasClients) {
           scrollController.jumpTo(0);
+          // Nhảy tới trang đã lưu (từ startPage backend hoặc local prefs).
+          if (!usePageMode &&
+              currentPage > 1 &&
+              currentPage <= totalPages) {
+            _jumpToImage(currentPage - 1, animate: false);
+          } else if (openAtLastPage) {
+            scrollController.jumpTo(
+              scrollController.position.maxScrollExtent,
+            );
+          }
         }
 
         if (_horizontalScrollController.hasClients) {
           _horizontalScrollController.jumpTo(0);
-        }
-
-        if (_pageController.hasClients) {
-          _pageController.jumpToPage(
-            openAtLastPage && totalPages > 0 ? totalPages - 1 : 0,
-          );
-        }
-
-        if (openAtLastPage &&
-            !usePageMode &&
-            scrollController.hasClients) {
-          scrollController.jumpTo(
-            scrollController.position.maxScrollExtent,
-          );
         }
 
         _keyboardFocusNode.requestFocus();
@@ -727,8 +749,8 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
 
         // Giải mã sẵn vài trang quanh trang đang mở vào bộ nhớ.
         _precachePageWindow(totalPages > 0
-            ? (openAtLastPage ? totalPages : 1)
-            : 1);
+            ? (openAtLastPage ? totalPages : currentPage)
+            : currentPage);
       });
 
       await saveReadingHistory(id);
@@ -759,6 +781,7 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
           storyId,
           chapterId,
           currentSource,
+          page: currentPage,
         );
 
         await ReadingList().save(
@@ -904,6 +927,7 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
 
     if (newPage != currentPage && mounted) {
       setState(() => currentPage = newPage);
+      _savePageProgressDebounced(newPage);
     }
   }
 
@@ -925,12 +949,23 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       currentPage = newPage;
     });
 
+    _savePageProgressDebounced(newPage);
+
     _precachePageWindow(newPage);
   }
 
   @override
   void dispose() {
     _prefetchGeneration++;
+
+    // Hủy debounce và lưu ngay trang đang đọc trước khi thoát chương.
+    _pageSaveDebounceTimer?.cancel();
+    _pageSaveDebounceTimer = null;
+
+    // Lưu trang đang đọc trước khi thoát chương để đọc tiếp được nhảy đúng trang.
+    if (currentChapterId > 0 && currentPage >= 1) {
+      _savePageProgress(currentPage);
+    }
 
     scrollController.removeListener(updateReadingProgress);
 
@@ -982,6 +1017,57 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       'lastReadCreatedById',
       currentSource,
     );
+  }
+
+  /// Lưu trang hiện tại đang đọc của chương (theo storyId + chapterId)
+  /// để khi đọc tiếp có thể nhảy đúng trang đó. Gọi trực tiếp (không debounce).
+  Future<void> _savePageProgress(int page) async {
+    if (page < 1 || storyId <= 0 || currentChapterId <= 0) return;
+    try {
+      final prefs = await AppPreferences.getInstance();
+      await prefs.setInt('lastReadPage_${storyId}_$currentChapterId', page);
+
+      // Đồng bộ lên backend nếu đã đăng nhập.
+      final userString = prefs.getString('user');
+      if (userString != null) {
+        final user = User.fromJson(jsonDecode(userString));
+        await LastRead().updateLastRead(
+          user.id,
+          storyId,
+          currentChapterId,
+          currentSource,
+          page: page,
+        );
+      }
+    } catch (e) {
+      debugPrint('Không thể lưu tiến độ trang: $e');
+    }
+  }
+
+  /// Gọi lưu tiến độ trang với debounce (mặc định 600ms) để tránh gửi quá
+  /// nhiều request khi người đọc vuốt trang liên tiếp.
+  void _savePageProgressDebounced(int page, {Duration delay = const Duration(milliseconds: 500)}) {
+    if (page < 1 || storyId <= 0 || currentChapterId <= 0) return;
+    _pageSaveDebounceTimer?.cancel();
+    _pageSaveDebounceTimer = Timer(delay, () {
+      _pageSaveDebounceTimer = null;
+      if (!mounted) return;
+      _savePageProgress(page);
+    });
+  }
+
+  /// Đọc trang đã lưu của chương (nếu có), trả về null nếu chưa có.
+  Future<int?> _loadSavedPage(int chapterId) async {
+    if (storyId <= 0) return null;
+    try {
+      final prefs = await AppPreferences.getInstance();
+      final page = prefs.getInt('lastReadPage_${storyId}_$chapterId');
+      if (page == null || page < 1) return null;
+      return page;
+    } catch (e) {
+      debugPrint('Không thể đọc tiến độ trang: $e');
+      return null;
+    }
   }
 
   /// Nút điều hướng chương luôn chuyển chương, không phụ thuộc chế độ đọc.
@@ -1528,16 +1614,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
 
             const Spacer(),
 
-            RotatedBox(
-              quarterTurns: 3,
-              child: Text(
-                totalPages == 0
-                    ? '0 / 0'
-                    : '$currentPage / $totalPages',
-                style: Theme.of(context).textTheme.labelMedium,
-              ),
-            ),
-
             const SizedBox(height: 12),
 
             IconButton(
@@ -1745,7 +1821,9 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       child: PageView.builder(
         controller: _pageController,
         scrollDirection: Axis.horizontal,
-        physics: const NeverScrollableScrollPhysics(),
+        physics: _mobileZoomed
+            ? const NeverScrollableScrollPhysics()
+            : const PageScrollPhysics(),
         itemCount: totalPages,
         onPageChanged: onPageChanged,
         itemBuilder: (context, pageIndex) {
@@ -2013,46 +2091,69 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          IconButton(
-            onPressed: loading ? null : goPrev,
-            icon: const Icon(
-              Icons.arrow_back,
-              color: Colors.white,
-            ),
-            tooltip: 'Chương trước',
-          ),
-
-          IconButton(
-            onPressed: () {
-              Navigator.popUntil(
-                context,
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                onPressed: loading ? null : goPrev,
+                icon: const Icon(
+                  Icons.arrow_back,
+                  color: Colors.white,
+                ),
+                tooltip: 'Chương trước',
+              ),
+              IconButton(
+                onPressed: () {
+                  Navigator.popUntil(
+                    context,
                     (route) => route.isFirst,
-              );
-            },
-            icon: const Icon(
-              Icons.home,
-              color: Colors.white,
-            ),
-            tooltip: 'Về trang chủ',
+                  );
+                },
+                icon: const Icon(
+                  Icons.home,
+                  color: Colors.white,
+                ),
+                tooltip: 'Về trang chủ',
+              ),
+            ],
           ),
-
-          IconButton(
-            onPressed: () =>
-                _scaffoldKey.currentState?.openDrawer(),
-            icon: const Icon(
-              Icons.menu,
-              color: Colors.white,
+          if (totalPages > 0)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                '$currentPage / $totalPages',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
             ),
-            tooltip: 'Danh sách chương',
-          ),
-
-          IconButton(
-            onPressed: loading ? null : goNext,
-            icon: const Icon(
-              Icons.arrow_forward,
-              color: Colors.white,
-            ),
-            tooltip: 'Chương tiếp theo',
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                onPressed: () =>
+                    _scaffoldKey.currentState?.openDrawer(),
+                icon: const Icon(
+                  Icons.menu,
+                  color: Colors.white,
+                ),
+                tooltip: 'Danh sách chương',
+              ),
+              IconButton(
+                onPressed: loading ? null : goNext,
+                icon: const Icon(
+                  Icons.arrow_forward,
+                  color: Colors.white,
+                ),
+                tooltip: 'Chương tiếp theo',
+              ),
+            ],
           ),
         ],
       ),

@@ -6,6 +6,7 @@ class User {
   final int lastReadStoryId;
   final int lastReadChapterId;
   final String lastReadCreatedBy;
+  final int lastReadPage;
   final String role;
   User({
     required this.id,
@@ -15,6 +16,7 @@ class User {
     required this.lastReadStoryId,
     required this.lastReadChapterId,
     required this.lastReadCreatedBy,
+    required this.lastReadPage,
     required this.role
   });
   factory User.fromJson(Map<String, dynamic> json) {
@@ -26,6 +28,7 @@ class User {
       lastReadStoryId: json['lastReadStoryId'],
       lastReadChapterId: json['lastReadChapterId'],
       lastReadCreatedBy: json['lastReadCreatedBy'],
+      lastReadPage: (json['lastReadPage'] as num?)?.toInt() ?? 1,
       role: json['role']
     );
   }
@@ -38,6 +41,7 @@ class User {
       "lastReadStoryId":lastReadStoryId,
       "lastReadChapterId":lastReadChapterId,
       'lastReadCreatedBy':lastReadCreatedBy,
+      'lastReadPage': lastReadPage,
       'role': role
     };
   }

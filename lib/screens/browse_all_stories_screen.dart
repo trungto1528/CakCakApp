@@ -213,6 +213,7 @@ class _BrowseAllStoriesScreenState extends State<BrowseAllStoriesScreen> {
     final imageUrl = cover.isEmpty
         ? ''
         : '${ApiConfig.coverImage}/$cover';
+    final creator = story['createdByName']?.toString().trim();
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       clipBehavior: Clip.antiAlias,
@@ -236,6 +237,17 @@ class _BrowseAllStoriesScreenState extends State<BrowseAllStoriesScreen> {
                 ),
         ),
         title: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis),
+        subtitle: creator != null && creator.isNotEmpty
+            ? Text(
+                'Người crawl: $creator',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
+                ),
+              )
+            : null,
         onTap: () => _onStoryTap(story),
       ),
     );

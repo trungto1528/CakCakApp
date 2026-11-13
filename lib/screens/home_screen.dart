@@ -34,6 +34,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
   int? userId;
   int? lastStoryId;
   int? lastChapterId;
+  int? lastReadPage;
   String? lastReadCreatedBy;
   String? coverUrl;
   final TextEditingController _offlineSearchController =
@@ -89,6 +90,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
       lastChapterNumber = null;
       lastStoryId = null;
       lastChapterId = null;
+      lastReadPage = null;
       lastReadCreatedBy = null;
       coverUrl = null;
     });
@@ -113,6 +115,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
       final storedUser = prefs.getString('user');
       int? storedStoryId = prefs.getInt('lastStoryId');
       int? storedChapterId = prefs.getInt('lastChapterId');
+      int? storedPage = prefs.getInt('lastReadPage');
       String? storedCreatedBy = prefs.getString('lastReadCreatedBy');
       String? storyTitle;
       String? cover;
@@ -130,6 +133,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
             storedStoryId = currentUser.lastReadStoryId;
             storedChapterId = currentUser.lastReadChapterId;
             storedCreatedBy = currentUser.lastReadCreatedBy;
+            storedPage = currentUser.lastReadPage;
           }
         } catch (e) {
           debugPrint('Không thể đồng bộ lịch sử đọc: $e');
@@ -166,6 +170,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
         userId = uid;
         lastStoryId = storedStoryId;
         lastChapterId = storedChapterId;
+        lastReadPage = storedPage;
         lastReadCreatedBy = storedCreatedBy;
         lastStoryTitle = storyTitle;
         coverUrl = cover;
@@ -618,11 +623,13 @@ class _HomePageState extends State<HomePage> with RouteAware {
                               storyId: lastStoryId!,
                               chapterId: lastChapterId!,
                               source: lastReadCreatedBy!,
+                              startPage: lastReadPage!,
                             )
                           : ChapterReaderScreen(
                               storyId: lastStoryId!,
                               chapterId: lastChapterId!,
                               source: lastReadCreatedBy!,
+                              startPage: lastReadPage!,
                             );
                     },
                   ),
@@ -671,7 +678,10 @@ class _HomePageState extends State<HomePage> with RouteAware {
                             overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 6),
-                          Text('Chương ${lastChapterNumber ?? ''}'),
+                          Text(
+                            'Chương ${lastChapterNumber ?? ''}'
+                            '${lastReadPage != null ? ' • Trang $lastReadPage' : ''}',
+                          ),
                         ],
                       ),
                     ),
