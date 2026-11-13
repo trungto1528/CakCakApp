@@ -623,13 +623,13 @@ class _HomePageState extends State<HomePage> with RouteAware {
                               storyId: lastStoryId!,
                               chapterId: lastChapterId!,
                               source: lastReadCreatedBy!,
-                              startPage: lastReadPage!,
+                              startPage: lastReadPage,
                             )
                           : ChapterReaderScreen(
                               storyId: lastStoryId!,
                               chapterId: lastChapterId!,
                               source: lastReadCreatedBy!,
-                              startPage: lastReadPage!,
+                              startPage: lastReadPage,
                             );
                     },
                   ),

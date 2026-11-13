@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:core';
 import 'dart:io';
 import 'dart:math' as math;
-
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -11,7 +11,6 @@ import 'package:flutter/services.dart';
 import 'package:novel_app/screens/story_detail_screen.dart';
 import 'package:novel_app/services/last_read.dart';
 import 'package:novel_app/services/reading_list.dart';
-
 import '../config/api_config.dart';
 import '../models/User.dart';
 import '../offline/service/offline_entry_service.dart';
@@ -20,194 +19,147 @@ import '../services/app_preference.dart';
 import '../services/chapter_cache_manager.dart';
 import '../services/chapter_fetcher.dart';
 import '../services/chapter_image_prefetcher.dart';
+import '../services/comment_service.dart';
 import '../services/story_fetcher.dart';
 import '../widget/sequential_chapter_image.dart';
-
 abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
     extends State<T> {
   final ScrollController scrollController = ScrollController();
   final ScrollController _horizontalScrollController = ScrollController();
   final PageController _pageController = PageController();
-
+  bool _isJumpingToInitialPage = false;
+  int _jumpToImageRetryCount = 0;
   final GlobalKey<ScaffoldState> _scaffoldKey =
   GlobalKey<ScaffoldState>();
-
   final GlobalKey _listViewKey = GlobalKey();
   final GlobalKey _readerViewportKey = GlobalKey();
-
   final FocusNode _keyboardFocusNode = FocusNode();
-
   final TransformationController transformController =
   TransformationController();
-
   // Windows continuous mode: toàn bộ chương được biến đổi như một canvas.
   final TransformationController _windowsCanvasController =
   TransformationController();
   final GlobalKey _windowsCanvasKey = GlobalKey();
-
   bool _mobileZoomed = false;
-
   final Set<int> _activePointers = <int>{};
-
   Size _mobileViewport = Size.zero;
-
   Map<String, dynamic>? chapter;
-
   List<dynamic> blocks = [];
   List<dynamic> chapters = [];
   List<dynamic> _allChapters = [];
-
   List<String> sources = [];
-
   late String currentSource;
-
   List<int> _imageIndexByBlockIndex = [];
   List<int> _imageBlockIndexes = [];
-
   List<GlobalKey> _imageKeys = [];
-
   final Set<int> _finishedInitialImageIndexes = {};
-
   // Cache ảnh trong RAM cho toàn bộ chương đang xem để khi lùi lại trang
   // trong cùng một màn hình đọc không phải tải lại từ mạng/dĩa.
   final Map<String, ImageProvider> _memoryImageCache = {};
-
   // Tăng mỗi khi mở chương mới hoặc rời màn hình để hủy prefetch cũ.
   int _prefetchGeneration = 0;
-
   // Debounce lưu tiến độ trang: chờ người đọc dừng vuốt mới gửi lên server.
   Timer? _pageSaveDebounceTimer;
-
   bool _isCtrlZooming = false;
-
   late int currentChapterId;
   late double lastChapterNumber;
   late String lastStoryTitle;
   late String coverUrl;
   late int index;
-
   int? nextId;
   int? prevId;
-
   int totalPages = 0;
   int currentPage = 0;
   int initialImageCount = 0;
-
   bool allowRemainingImages = false;
   bool useOfflineImages = false;
   bool loading = true;
-
+  // ===== BÌNH LUẬN =====
+  List<Map<String, dynamic>> comments = [];
+  bool commentLoading = false;
+  final TextEditingController commentController = TextEditingController();
+  int? replyingToCommentId;
   double zoomScale = 1.0;
   double maxAllowedZoomScale = 2.5;
   double scrollSensitivity = 1.0;
-
   double lastAvailableWidth = 0.0;
   double lastBaseContentWidth = 0.0;
-
   static const double minZoomScale = 0.5;
   static const double maxZoomLimit = 3.5;
   static const double zoomStep = 0.1;
-
   int chapterId = 0;
   int storyId = 0;
-
   int? startPage;
-
   String source = '';
-
   bool usePageMode = false;
-
   bool get isWindows =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
-
   bool get isMobile =>
       !kIsWeb &&
           (defaultTargetPlatform == TargetPlatform.android ||
               defaultTargetPlatform == TargetPlatform.iOS);
-
   bool get isOffline => OfflineModeService.isOffline.value;
-
   // ============================================================
   // CÀI ĐẶT
   // ============================================================
-
   Future<void> loadReaderSettings() async {
     try {
       final prefs = await AppPreferences.getInstance();
-
       final sensitivity =
           prefs.getDouble('reader_scroll_sensitivity') ?? 1.0;
-
       final pageMode =
           prefs.getBool('reader_page_mode') ?? false;
-
       if (!mounted) return;
-
       setState(() {
         scrollSensitivity =
             sensitivity.clamp(0.5, 10.0).toDouble();
-
         usePageMode = pageMode;
       });
     } catch (e) {
       debugPrint('Không thể tải thông tin cài đặt: $e');
     }
   }
-
   /// Chuyển chế độ đọc sang trạng thái được chỉ định.
   /// Giao diện được cập nhật ngay, không phải chờ lưu Preferences.
   Future<void> setReaderMode(bool nextMode) async {
     if (nextMode == usePageMode) return;
-
     if (!usePageMode) {
       updateReadingProgress();
     }
-
     if (!mounted) return;
-
     setState(() {
       usePageMode = nextMode;
     });
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || totalPages == 0) return;
-
       final targetPage =
       (currentPage - 1).clamp(0, totalPages - 1);
-
       if (nextMode) {
         if (_pageController.hasClients) {
           _pageController.jumpToPage(targetPage);
         }
-
         _precachePageWindow(targetPage.toInt() + 1);
       } else {
         _jumpToImage(targetPage);
       }
     });
-
     try {
       final prefs = await AppPreferences.getInstance();
-
       await prefs.setBool('reader_page_mode', nextMode);
     } catch (e) {
       debugPrint('Không thể lưu chế độ đọc: $e');
     }
   }
-
   /// Giữ lại hàm toggle để tương thích với các vị trí gọi hiện tại.
   Future<void> toggleReaderMode() async {
     await setReaderMode(!usePageMode);
   }
-
   /// Lưu độ nhạy cuộn.
   Future<void> _saveScrollSensitivity(double value) async {
     final normalizedValue =
     value.clamp(0.5, 10.0).toDouble();
-
     try {
       final prefs = await AppPreferences.getInstance();
-
       await prefs.setDouble(
         'reader_scroll_sensitivity',
         normalizedValue,
@@ -216,11 +168,9 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       debugPrint('Không thể lưu độ nhạy cuộn: $e');
     }
   }
-
   Future<void> showReaderSettingsDialog() async {
     var selectedPageMode = usePageMode;
     var selectedSensitivity = scrollSensitivity;
-
     await showDialog<void>(
       context: context,
       barrierDismissible: true,
@@ -250,7 +200,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
                             setDialogState(() {
                               selectedPageMode = value;
                             });
-
                             // Chuyển chế độ đọc ngay khi gạt công tắc.
                             setReaderMode(value);
                           },
@@ -261,7 +210,8 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
                             selectedPageMode
                                 ? 'Đang ở chế độ từng trang'
                                 : 'Đang ở chế độ cuộn',
-                            style: Theme.of(context)
+                            style: Theme
+                                .of(context)
                                 .textTheme
                                 .bodySmall,
                           ),
@@ -301,7 +251,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
                                 setDialogState(() {
                                   selectedSensitivity = value;
                                 });
-
                                 // Áp dụng độ nhạy ngay khi kéo.
                                 if (mounted) {
                                   setState(() {
@@ -325,14 +274,12 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
                                 setDialogState(() {
                                   selectedSensitivity = 1.0;
                                 });
-
                                 // Đặt lại độ nhạy và áp dụng ngay.
                                 if (mounted) {
                                   setState(() {
                                     scrollSensitivity = 1.0;
                                   });
                                 }
-
                                 // Lưu giá trị mặc định ngay lập tức.
                                 _saveScrollSensitivity(1.0);
                               },
@@ -363,7 +310,8 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
                       Text(
                         'Áp dụng cho con lăn chuột, phím mũi tên lên/xuống '
                             'và nút cuộn.',
-                        style: Theme.of(context)
+                        style: Theme
+                            .of(context)
                             .textTheme
                             .bodySmall,
                         textAlign: TextAlign.center,
@@ -378,237 +326,175 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       },
     );
   }
-
   // ============================================================
   // KHỞI TẠO TRUYỆN
   // ============================================================
-
   Future<void> initData() async {
     if (mounted) {
       setState(() {
         loading = true;
       });
     }
-
     try {
       final storyData =
       await StoryFetcher().fetchStory(storyId);
-
       final allChapters = storyData['chapters'] is List
           ? List<dynamic>.from(storyData['chapters'])
           : <dynamic>[];
-
       final sourceSet = <String>{};
-
       for (final item in allChapters) {
         if (item is! Map) continue;
-
         final itemSource =
             item['createdBy']?.toString().trim() ?? '';
-
         if (itemSource.isNotEmpty) {
           sourceSet.add(itemSource);
         }
       }
-
       final sourceList = sourceSet.toList()
         ..sort(
               (a, b) =>
               a.toLowerCase().compareTo(b.toLowerCase()),
         );
-
       var initialSource = source;
-
       var initialChapters = getChaptersBySourceFrom(
         allChapters,
         initialSource,
       );
-
       if (initialChapters.isEmpty && allChapters.isNotEmpty) {
         dynamic initialChapter;
-
         for (final item in allChapters) {
           if (chapterIdOf(item) == chapterId) {
             initialChapter = item;
             break;
           }
         }
-
         if (initialChapter is Map) {
           initialSource =
               initialChapter['createdBy']?.toString().trim() ?? '';
         }
-
         if (initialSource.isEmpty && sourceList.isNotEmpty) {
           initialSource = sourceList.first;
         }
-
         initialChapters = getChaptersBySourceFrom(
           allChapters,
           initialSource,
         );
       }
-
       if (!mounted) return;
-
       setState(() {
         _allChapters = allChapters;
         sources = sourceList;
         currentSource = initialSource;
         chapters = initialChapters;
-
         lastStoryTitle =
             storyData['title']?.toString() ?? '';
-
         coverUrl =
             storyData['coverUrl']?.toString() ?? '';
       });
-
       var targetChapterId = chapterId;
-
-      final chapterExists = chapters.any(
+      // Kiểm tra trong toàn bộ chapter (allChapters) trước, không giới hạn source,
+      // tránh trường hợp chapter muốn đọc bị loại ra do lọc theo source dẫn đến
+      // nhầm sang chapter khác và load sai trang.
+      final chapterExistsInAll = allChapters.any(
             (item) => chapterIdOf(item) == targetChapterId,
       );
-
-      if (!chapterExists && chapters.isNotEmpty) {
+      if (!chapterExistsInAll && allChapters.isNotEmpty) {
         targetChapterId =
             chapterIdOf(chapters.first) ?? chapterId;
       }
-
       await fetchChapter(targetChapterId);
     } catch (e) {
       if (!mounted) return;
-
       setState(() {
         loading = false;
       });
-
       debugPrint('Lỗi tải thông tin truyện: $e');
-
       showError('Không thể tải thông tin truyện: $e');
     }
   }
-
   int? chapterIdOf(dynamic item) {
     if (item is! Map) return null;
-
     final value = item['id'];
-
     if (value is int) return value;
     if (value is num) return value.toInt();
-
     return int.tryParse(value?.toString() ?? '');
   }
-
   double parseChapterNumber(dynamic value) {
     if (value is num) return value.toDouble();
-
     return double.tryParse(value?.toString() ?? '') ?? 0;
   }
-
-  List<dynamic> getChaptersBySourceFrom(
-      List<dynamic> sourceChapters,
-      String source,
-      ) {
+  List<dynamic> getChaptersBySourceFrom(List<dynamic> sourceChapters,
+      String source,) {
     final filtered = sourceChapters.where((item) {
       if (item is! Map) return false;
-
       return (item['createdBy']?.toString().trim() ?? '') ==
           source;
     }).toList();
-
     filtered.sort((a, b) {
       final numberA =
       parseChapterNumber(a['chapterNumber']);
-
       final numberB =
       parseChapterNumber(b['chapterNumber']);
-
       final comparison = numberA.compareTo(numberB);
-
       if (comparison != 0) return comparison;
-
       return (chapterIdOf(a) ?? 0)
           .compareTo(chapterIdOf(b) ?? 0);
     });
-
     return filtered;
   }
-
   List<dynamic> getChaptersBySource(String source) =>
       getChaptersBySourceFrom(_allChapters, source);
-
   // ============================================================
   // ĐỔI SOURCE
   // ============================================================
-
   Future<void> changeSource(String newSource) async {
     if (newSource == currentSource || loading) return;
-
     final filtered = getChaptersBySource(newSource);
-
     if (filtered.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Source "$newSource" không có chapter.'),
         ),
       );
-
       return;
     }
-
     setState(() {
       currentSource = newSource;
       chapters = filtered;
     });
-
     updateNextPrev();
   }
-
   // ============================================================
   // TẢI CHƯƠNG
   // ============================================================
-
-  Future<void> fetchChapter(
-      int id, {
-        bool openAtLastPage = false,
-      }) async {
+  Future<void> fetchChapter(int id, {
+    bool openAtLastPage = false,
+  }) async {
     if (!mounted) return;
-
     final prefetchGeneration = ++_prefetchGeneration;
-
     setState(() {
       loading = true;
     });
-
     try {
       final data = await ChapterFetcher().fetchChapter(
         id,
         storyId: storyId,
       );
-
       if (!mounted) return;
-
       // Đọc trang đã lưu cho chương này để tiếp tục đọc từ trang dở.
       final savedPage = await _loadSavedPage(id);
-
       final newBlocks =
       List<dynamic>.from(data['blocks'] ?? []);
-
       final imageIndexByBlockIndex = <int>[];
       final imageBlockIndexes = <int>[];
       final imageUrls = <String>[];
-
       var imageCount = 0;
-
       for (int i = 0; i < newBlocks.length; i++) {
         final block = newBlocks[i];
-
         if (block is Map && block['type'] == 'image') {
           imageIndexByBlockIndex.add(imageCount);
           imageBlockIndexes.add(i);
           imageCount++;
-
           final imageName = block['data']?.toString() ?? '';
           if (imageName.isNotEmpty) {
             imageUrls.add('${ApiConfig.chapterImage}/$imageName');
@@ -617,14 +503,11 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
           imageIndexByBlockIndex.add(-1);
         }
       }
-
       bool offlineImages = false;
-
       final storyAvailable =
       await OfflineEntryService.instance.isStoryAvailable(
         storyId,
       );
-
       if (storyAvailable) {
         offlineImages =
         await OfflineEntryService.instance.isChapterAvailable(
@@ -632,76 +515,55 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
           id,
         );
       }
-
       final imageKeys = List<GlobalKey>.generate(
         imageCount,
             (_) => GlobalKey(),
       );
-
       currentChapterId = id;
-
       setState(() {
         chapter = data;
-
         blocks = newBlocks;
-
         _imageIndexByBlockIndex =
             imageIndexByBlockIndex;
-
         _imageBlockIndexes = imageBlockIndexes;
-
         _imageKeys = imageKeys;
-
         totalPages = imageCount;
-
         final defaultPage = openAtLastPage ? imageCount : 1;
-
         int? initialPage;
         if (!openAtLastPage) {
-          initialPage = startPage;
-          if (initialPage == null) {
-            initialPage = savedPage;
-          }
+          // Ưu tiên trang đã lưu mỗi chương (local prefs), chính xác nhất khi đọc tiếp.
+          initialPage = savedPage ?? startPage;
+          // startPage chỉ dùng một lần (khi vào từ "đọc tiếp"), tránh áp sai trang
+          // sang chương khác khi chuyển chương trong cùng phiên đọc.
+          startPage = null;
         }
-
         currentPage = imageCount > 0
             ? ((initialPage != null &&
-                    initialPage >= 1 &&
-                    initialPage <= imageCount)
-                ? initialPage
-                : defaultPage)
+            initialPage >= 1 &&
+            initialPage <= imageCount)
+            ? initialPage
+            : defaultPage)
             : 0;
-
         // Tất cả ảnh của chương được phép tải ngay, không chờ cuộn tới.
         initialImageCount = 0;
         _finishedInitialImageIndexes.clear();
         allowRemainingImages = true;
-
         // Xóa cache ảnh RAM của chương cũ để không trùng lẫn khi mở chương mới.
         _memoryImageCache.clear();
-
         useOfflineImages = offlineImages;
-
         zoomScale = 1.0;
         _isCtrlZooming = false;
-
         transformController.value = Matrix4.identity();
         _windowsCanvasController.value = Matrix4.identity();
-
         _mobileZoomed = false;
         _activePointers.clear();
-
         lastChapterNumber =
             parseChapterNumber(data['chapterNumber']);
-
         loading = false;
       });
-
       updateNextPrev();
-
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || currentChapterId != id) return;
-
         // Tải trước toàn bộ ảnh của chương vào đúng cache đĩa mà
         // các widget đọc ảnh đang dùng. Nhờ vậy khi chuyển trang
         // không phải chờ tải mạng lại.
@@ -709,73 +571,78 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
           final orderedUrls = openAtLastPage
               ? imageUrls.reversed.toList(growable: false)
               : imageUrls;
-
           ChapterImagePrefetcher.prefetchChapterImages(
             orderedUrls,
             concurrency: 3,
             isCancelled: () =>
-                !mounted ||
+            !mounted ||
                 currentChapterId != id ||
                 _prefetchGeneration != prefetchGeneration,
           );
         }
-
         if (_pageController.hasClients) {
           final targetPage = (currentPage - 1).clamp(0, totalPages - 1);
           _pageController.jumpToPage(targetPage);
         } else if (scrollController.hasClients) {
-          scrollController.jumpTo(0);
-          // Nhảy tới trang đã lưu (từ startPage backend hoặc local prefs).
+          // Nhảy trực tiếp tới trang đã lưu, không nhảy về đầu trước (tránh
+          // listener updateReadingProgress reset currentPage về 1).
+          _isJumpingToInitialPage = true;
+          bool needsJump = false;
           if (!usePageMode &&
               currentPage > 1 &&
               currentPage <= totalPages) {
             _jumpToImage(currentPage - 1, animate: false);
+            needsJump = true;
           } else if (openAtLastPage) {
             scrollController.jumpTo(
               scrollController.position.maxScrollExtent,
             );
+            needsJump = true;
+          }
+
+          if (needsJump) {
+            // Chờ sau frame tiếp theo để tắt cờ và cập nhật tiến độ, tránh
+            // updateReadingProgress đọc sai vị trí cuộn trước khi jump hoàn tất.
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                _isJumpingToInitialPage = false;
+                if (!openAtLastPage) {
+                  updateReadingProgress();
+                }
+              }
+            });
+          } else {
+            _isJumpingToInitialPage = false;
+            if (!openAtLastPage) {
+              updateReadingProgress();
+            }
           }
         }
-
         if (_horizontalScrollController.hasClients) {
           _horizontalScrollController.jumpTo(0);
         }
-
         _keyboardFocusNode.requestFocus();
-
-        if (!openAtLastPage) {
-          updateReadingProgress();
-        }
-
         // Giải mã sẵn vài trang quanh trang đang mở vào bộ nhớ.
         _precachePageWindow(totalPages > 0
             ? (openAtLastPage ? totalPages : currentPage)
             : currentPage);
       });
-
       await saveReadingHistory(id);
     } catch (e) {
       if (!mounted) return;
-
       setState(() {
         loading = false;
       });
-
       debugPrint('Lỗi tải chương: $e');
-
       showError('Không thể tải chương: $e');
     }
   }
-
   Future<void> saveReadingHistory(int chapterId) async {
     try {
       final prefs = await AppPreferences.getInstance();
-
       final userString = prefs.getString('user');
-
       if (userString != null) {
         final user = User.fromJson(jsonDecode(userString));
-
         await LastRead().updateLastRead(
           user.id,
           storyId,
@@ -783,7 +650,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
           currentSource,
           page: currentPage,
         );
-
         await ReadingList().save(
           user.id,
           storyId,
@@ -796,61 +662,509 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       debugPrint('Không thể lưu lịch sử đọc: $e');
     }
   }
-
   void showError(String message) {
     if (!mounted) return;
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
   }
+  // ============================================================
+  // BÌNH LUẬN (COMMENT)
+  // ============================================================
 
-  void onInitialImageFinished(
-      int chapterId,
-      int imageIndex,
-      ) {
-    if (!mounted || chapterId != currentChapterId) return;
-
-    if (imageIndex >= initialImageCount) return;
-
-    if (!_finishedInitialImageIndexes.add(imageIndex)) {
-      return;
-    }
-
-    if (_finishedInitialImageIndexes.length >=
-        initialImageCount) {
-      setState(() {
-        allowRemainingImages = true;
-      });
+  /// Định dạng ngày giờ bình luận ngắn gọn: dd/MM/yyyy HH:mm.
+  String _formatCommentDate(String created) {
+    if (created.isEmpty) return '';
+    try {
+      String datePart, timePart;
+      final tIndex = created.indexOf('T');
+      if (tIndex >= 0) {
+        datePart = created.substring(0, tIndex);
+        final rest = created.substring(tIndex + 1);
+        final dotIndex = rest.indexOf('.');
+        final plusIndex = rest.indexOf('+');
+        final endIndex = dotIndex >= 0
+            ? dotIndex
+            : (plusIndex >= 0 ? plusIndex : rest.length);
+        timePart = rest.substring(0, endIndex);
+      } else {
+        final spaceIndex = created.indexOf(' ');
+        if (spaceIndex >= 0) {
+          datePart = created.substring(0, spaceIndex);
+          timePart = created.substring(spaceIndex + 1);
+        } else {
+          datePart = created;
+          timePart = '';
+        }
+      }
+      final dParts = datePart.split('-');
+      if (dParts.length == 3) {
+        final day = dParts[2];
+        final month = dParts[1];
+        final year = dParts[0];
+        final tParts = timePart.split(':');
+        if (tParts.length >= 2) {
+          return '$day/$month/$year ${tParts[0]}:${tParts[1]}';
+        }
+        return '$day/$month/$year';
+      }
+      return created;
+    } catch (e) {
+      return created;
     }
   }
 
+  /// Lấy hint text hiển thị tên comment cha khi đang trả lời.
+  String _getParentHint(int? replyingToId, List<Map<String, dynamic>> comments) {
+    if (replyingToId == null) return 'Viết bình luận...';
+    for (final c in comments) {
+      final id = (c['id'] as num).toInt();
+      if (id == replyingToId) {
+        final name =
+            c['username'] ?? c['displayName'] ?? 'Người dùng';
+        return 'Trả lời $name...';
+      }
+    }
+    return 'Viết trả lời...';
+  }
+
+  Widget _buildCommentList(
+      List<Map<String, dynamic>> comments,
+      BuildContext context,
+      void Function(void Function()) setDialog,
+      int? Function() currentLoggedInUserId,
+      Future<void> Function(int, String) editComment,
+      Future<void> Function(int) deleteComment,
+      void Function(int) onSetReplyingToId,
+      ) {
+    // Bản tra cứu username của comment cha theo id.
+    final Map<int, String> parentUsernameById = {};
+    for (final comment in comments) {
+      final id = (comment['id'] as num).toInt();
+      final name =
+          comment['username'] ?? comment['displayName'] ?? 'Người dùng';
+      parentUsernameById[id] = name;
+    }
+
+    // Sắp xếp bình luận theo thời gian (cũ nhất lên trên).
+    final sortedComments = List<Map<String, dynamic>>.from(comments)
+      ..sort((a, b) {
+        final da = (a['createdAt'] ?? '').toString();
+        final db = (b['createdAt'] ?? '').toString();
+        return da.compareTo(db);
+      });
+
+    return ListView.builder(
+      itemCount: sortedComments.length,
+      itemBuilder: (context, index) {
+        final c = sortedComments[index];
+        final cid = (c['id'] as num).toInt();
+        final parentId = c['parentId'] != null
+            ? (c['parentId'] as num).toInt()
+            : null;
+        final ownerId = (c['userId'] as num?)?.toInt();
+        final isOwner =
+            ownerId != null &&
+                ownerId == currentLoggedInUserId();
+        final username =
+            c['username'] ??
+                c['displayName'] ??
+                'Người dùng';
+        final content = c['content'] ?? '';
+        final created = c['createdAt'] ?? '';
+        final formattedDate = _formatCommentDate(created);
+
+        return ListTile(
+          title: Text(
+            username,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(content),
+              const SizedBox(height: 4),
+              if (parentId != null) ...[
+                Text(
+                  'Trả lời ${parentUsernameById[parentId] ?? 'Người dùng'}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.grey.shade500,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+                const SizedBox(height: 4),
+              ],
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    formattedDate,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                  if (!isOwner) ...[
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: () {
+                        onSetReplyingToId(cid);
+                      },
+                      child: Text(
+                        'Trả lời',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.blue.shade700,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isOwner) ...[
+                IconButton(
+                  icon: const Icon(
+                    Icons.edit,
+                    size: 20,
+                    color: Colors.blue,
+                  ),
+                  onPressed: () => editComment(cid, content),
+                ),
+                IconButton(
+                  icon: const Icon(
+                    Icons.delete,
+                    size: 20,
+                    color: Colors.red,
+                  ),
+                  onPressed: () => deleteComment(cid),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showCommentDialog() async {
+    List<Map<String, dynamic>> dialogComments = [];
+    bool dialogLoading = false;
+    bool loadStarted = false;
+    bool posting = false;
+    final TextEditingController dialogController = TextEditingController();
+    int? dialogReplyingToId;
+    final messenger = ScaffoldMessenger.of(context);
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) =>
+          StatefulBuilder(
+            builder: (dialogContext, setDialogState) {
+              void setDialog(void Function() fn) {
+                if (!dialogContext.mounted) return;
+                setDialogState(fn);
+              }
+              void showDialogMessage(String message) {
+                if (!mounted) return;
+                messenger.showSnackBar(SnackBar(content: Text(message)));
+              }
+              Future<void> loadComments() async {
+                if (dialogLoading || !dialogContext.mounted) return;
+                setDialog(() => dialogLoading = true);
+                try {
+                  final data = await CommentService().getComments(
+                    chapterId: chapterId,
+                    page: 0,
+                    limit: 50,
+                  );
+                  if (!dialogContext.mounted) return;
+                  setDialog(() {
+                    dialogComments = data;
+                    dialogLoading = false;
+                  });
+                } catch (e) {
+                  if (!dialogContext.mounted) return;
+                  setDialog(() => dialogLoading = false);
+                  showDialogMessage('Không thể tải bình luận: $e');
+                }
+              }
+              Future<void> postComment(String text, {int? parentId}) async {
+                if (text
+                    .trim()
+                    .isEmpty || posting || !dialogContext.mounted) {
+                  return;
+                }
+                if (!mounted) return;
+                FocusManager.instance.primaryFocus?.unfocus();
+                setDialog(() => posting = true);
+                try {
+                  // Kiểm tra đăng nhập trước khi gửi bình luận.
+                  final prefs = await AppPreferences.getInstance();
+                  final userString = prefs.getString('user');
+                  if (!dialogContext.mounted) return;
+                  if (userString == null || userString.isEmpty) {
+                    // Đóng dialog trước khi hiển thị thông báo.
+                    Navigator.of(dialogContext).pop();
+                    showDialogMessage('Vui lòng đăng nhập để bình luận.');
+                    return;
+                  }
+                  await CommentService().createComment(
+                    chapterId: chapterId,
+                    content: text,
+                    parentId: parentId,
+                  );
+                  if (!dialogContext.mounted) return;
+                  dialogController.clear();
+                  setDialog(() {
+                    dialogReplyingToId = null;
+                    posting = false;
+                  });
+                  await loadComments();
+                } catch (e) {
+                  if (!dialogContext.mounted) return;
+                  setDialog(() => posting = false);
+                  showDialogMessage('$e');
+                } finally {
+                  if (dialogContext.mounted) {
+                    setDialog(() => posting = false);
+                  }
+                }
+              }
+              Future<void> editComment(int commentId, String oldContent) async {
+                final controller = TextEditingController(text: oldContent);
+                try {
+                  final confirmed = await showDialog<bool>(
+                    context: dialogContext,
+                    builder: (dc) =>
+                        AlertDialog(
+                          title: const Text('Chỉnh sửa bình luận'),
+                          content: TextField(
+                            controller: controller,
+                            maxLines: 3,
+                            autofocus: true,
+                            decoration: const InputDecoration(
+                              hintText: 'Nội dung bình luận',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(dc, false),
+                              child: const Text('Hủy'),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.pop(dc, true),
+                              child: const Text('Lưu'),
+                            ),
+                          ],
+                        ),
+                  );
+                  if (confirmed != true || !dialogContext.mounted) return;
+                  await CommentService().updateComment(
+                    commentId: commentId,
+                    newContent: controller.text,
+                  );
+                  if (!dialogContext.mounted) return;
+                  await loadComments();
+                } catch (e) {
+                  if (!dialogContext.mounted) return;
+                  showDialogMessage('$e');
+                } finally {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    controller.dispose();
+                  });
+                }
+              }
+              Future<void> deleteComment(int commentId) async {
+                try {
+                  final confirmed = await showDialog<bool>(
+                    context: dialogContext,
+                    builder: (dc) =>
+                        AlertDialog(
+                          title: const Text('Xóa bình luận'),
+                          content: const Text(
+                              'Bạn có chắc muốn xóa bình luận này?'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(dc, false),
+                              child: const Text('Hủy'),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.pop(dc, true),
+                              child: const Text('Xóa'),
+                            ),
+                          ],
+                        ),
+                  );
+                  if (confirmed != true || !dialogContext.mounted) return;
+                  await CommentService().deleteComment(commentId);
+                  if (!dialogContext.mounted) return;
+                  await loadComments();
+                } catch (e) {
+                  if (!dialogContext.mounted) return;
+                  showDialogMessage('$e');
+                }
+              }
+              int? currentLoggedInUserId() {
+                return null; // Sử dụng null để tránh kiểm tra quyền sở hữu phức tạp
+              }
+              if (!loadStarted) {
+                loadStarted = true;
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (dialogContext.mounted) {
+                    loadComments();
+                  }
+                });
+              }
+              return FocusScope(
+                child: AlertDialog(
+                  title: const Text('Bình luận'),
+                content: SizedBox(
+                  width: 600,
+                  height: 400,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: dialogLoading && dialogComments.isEmpty
+                            ? const Center(child: CircularProgressIndicator())
+                            : dialogComments.isEmpty
+                            ? const Center(child: Text('Chưa có bình luận nào'))
+                            : _buildCommentList(
+                              dialogComments,
+                              context,
+                              setDialog,
+                              currentLoggedInUserId,
+                              editComment,
+                              deleteComment,
+                              (id) => setDialog(() => dialogReplyingToId = id),
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: dialogController,
+                              maxLines: null,
+                              minLines: 1,
+                              textInputAction: TextInputAction.send,
+                              enabled: !posting,
+                              onSubmitted: (_) =>
+                                  postComment(
+                                    dialogController.text,
+                                    parentId: dialogReplyingToId,
+                                  ),
+                              decoration: InputDecoration(
+                                hintText: dialogReplyingToId != null
+                                    ? _getParentHint(dialogReplyingToId, dialogComments)
+                                    : 'Viết bình luận...',
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(24),
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 10,
+                                ),
+                                suffixIcon: IconButton(
+                                  icon: posting
+                                      ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                      : const Icon(Icons.send, size: 20),
+                                  onPressed: posting
+                                      ? null
+                                      : () =>
+                                      postComment(
+                                        dialogController.text,
+                                        parentId: dialogReplyingToId,
+                                      ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  if (dialogReplyingToId != null)
+                    TextButton(
+                      onPressed: () {
+                        FocusManager.instance.primaryFocus?.unfocus();
+                        setDialog(() {
+                          dialogReplyingToId = null;
+                        });
+                      },
+                      child: const Text('Hủy trả lời'),
+                    ),
+                  TextButton(
+                    onPressed: () {
+                      FocusManager.instance.primaryFocus?.unfocus();
+                      Navigator.of(dialogContext).pop();
+                    },
+                    child: const Text('Đóng'),
+                  ),
+                  ],
+                ),
+              );
+            },
+          ),
+    ).whenComplete(() {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        FocusManager.instance.primaryFocus?.unfocus();
+        dialogController.dispose();
+      });
+    });
+  }
+  // ============================================================
+  // ON INITIAL IMAGE FINISHED
+  // ============================================================
+  void onInitialImageFinished(
+      int chapterId,
+      int imageIndex,
+  ) {
+  if (!mounted || chapterId != currentChapterId) return;
+  if (imageIndex >= initialImageCount) return;
+  if (!_finishedInitialImageIndexes.add(imageIndex)) {
+  return;
+  }
+  if (_finishedInitialImageIndexes.length >=
+  initialImageCount) {
+  setState(() {
+  allowRemainingImages = true;
+  });
+  }
+  }
   // ============================================================
   // TIẾN ĐỘ ĐỌC
   // ============================================================
-
   /// Giải mã sẵn vài trang quanh trang hiện tại vào bộ nhớ để chuyển
   /// trang tức thì. Chỉ giữ tối đa 5 ảnh (trang hiện tại ±2) nhằm tránh
   /// tốn RAM.
   void _precachePageWindow(int centerPage) {
     if (!mounted || !usePageMode || totalPages == 0) return;
     if (useOfflineImages) return;
-
     final int start = math.max(1, centerPage - 2);
     final int end = math.min(totalPages, centerPage + 2);
-
     for (int page = start; page <= end; page++) {
       final int blockIndex = _imageBlockIndexes[page - 1];
       if (blockIndex < 0 || blockIndex >= blocks.length) continue;
-
       final block = blocks[blockIndex];
       if (block is! Map) continue;
-
       final imageName = block['data']?.toString() ?? '';
       if (imageName.isEmpty) continue;
-
       final imageUrl = '${ApiConfig.chapterImage}/$imageName';
-
       precacheImage(
         CachedNetworkImageProvider(
           imageUrl,
@@ -858,19 +1172,16 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         ),
         context,
       ).then<void>(
-        (_) {},
+            (_) {},
         onError: (Object error, StackTrace stackTrace) {
           debugPrint('Lỗi preload ảnh $imageName: $error');
         },
       );
     }
   }
-
   void updateReadingProgress() {
-    if (usePageMode || totalPages == 0) return;
-
+    if (_isJumpingToInitialPage || usePageMode || totalPages == 0) return;
     RenderBox? viewportObject;
-
     if (isWindows) {
       final object = _readerViewportKey.currentContext?.findRenderObject();
       if (object is RenderBox && object.hasSize) {
@@ -883,33 +1194,30 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         viewportObject = object;
       }
     }
-
     if (viewportObject == null) return;
-
-    final viewportTop = viewportObject.localToGlobal(Offset.zero).dy;
+    final viewportTop = viewportObject
+        .localToGlobal(Offset.zero)
+        .dy;
     int? lastPageStarted;
     int? firstAvailablePage;
     int? visiblePage;
     int? nearestFollowingPage;
     double nearestFollowingDistance = double.infinity;
-
     for (int i = 0; i < _imageKeys.length; i++) {
       final imageObject = _imageKeys[i].currentContext?.findRenderObject();
       if (imageObject is! RenderBox || !imageObject.hasSize) continue;
-
-      final imageTop = imageObject.localToGlobal(Offset.zero).dy;
+      final imageTop = imageObject
+          .localToGlobal(Offset.zero)
+          .dy;
       final imageBottom = imageTop + imageObject.size.height;
       firstAvailablePage ??= i + 1;
-
       if (imageTop <= viewportTop) {
         lastPageStarted = i + 1;
       }
-
       if (imageTop <= viewportTop && imageBottom > viewportTop) {
         visiblePage = i + 1;
         break;
       }
-
       if (imageTop > viewportTop) {
         final distance = imageTop - viewportTop;
         if (distance < nearestFollowingDistance) {
@@ -918,107 +1226,79 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         }
       }
     }
-
     final newPage = visiblePage ??
         lastPageStarted ??
         nearestFollowingPage ??
         firstAvailablePage ??
         1;
-
     if (newPage != currentPage && mounted) {
       setState(() => currentPage = newPage);
       _savePageProgressDebounced(newPage);
     }
   }
-
   void _scheduleReadingProgressUpdate() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || usePageMode || _isCtrlZooming) return;
       updateReadingProgress();
     });
   }
-
   void onPageChanged(int page) {
     if (!mounted) return;
-
     final newPage = page + 1;
-
     if (newPage == currentPage) return;
-
     setState(() {
       currentPage = newPage;
     });
-
     _savePageProgressDebounced(newPage);
-
     _precachePageWindow(newPage);
   }
-
   @override
   void dispose() {
     _prefetchGeneration++;
-
     // Hủy debounce và lưu ngay trang đang đọc trước khi thoát chương.
     _pageSaveDebounceTimer?.cancel();
     _pageSaveDebounceTimer = null;
-
     // Lưu trang đang đọc trước khi thoát chương để đọc tiếp được nhảy đúng trang.
     if (currentChapterId > 0 && currentPage >= 1) {
       _savePageProgress(currentPage);
     }
-
     scrollController.removeListener(updateReadingProgress);
-
     transformController.removeListener(onTransformChanged);
-
     scrollController.dispose();
     _horizontalScrollController.dispose();
     _pageController.dispose();
-
     _keyboardFocusNode.dispose();
-
     transformController.dispose();
     _windowsCanvasController.dispose();
-
     super.dispose();
   }
-
   // ============================================================
   // ĐIỀU HƯỚNG CHƯƠNG
   // ============================================================
-
   void updateNextPrev() {
     index = chapters.indexWhere(
           (item) => chapterIdOf(item) == currentChapterId,
     );
-
     if (index == -1) {
       nextId = null;
       prevId = null;
       return;
     }
-
     prevId =
     index > 0 ? chapterIdOf(chapters[index - 1]) : null;
-
     nextId = index < chapters.length - 1
         ? chapterIdOf(chapters[index + 1])
         : null;
   }
-
   Future<void> saveLastRead(int chapterId) async {
     final prefs = await AppPreferences.getInstance();
-
     await prefs.setInt('lastStoryId', storyId);
-
     await prefs.setInt('lastChapterId', chapterId);
-
     await prefs.setString(
       'lastReadCreatedById',
       currentSource,
     );
   }
-
   /// Lưu trang hiện tại đang đọc của chương (theo storyId + chapterId)
   /// để khi đọc tiếp có thể nhảy đúng trang đó. Gọi trực tiếp (không debounce).
   Future<void> _savePageProgress(int page) async {
@@ -1026,7 +1306,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
     try {
       final prefs = await AppPreferences.getInstance();
       await prefs.setInt('lastReadPage_${storyId}_$currentChapterId', page);
-
       // Đồng bộ lên backend nếu đã đăng nhập.
       final userString = prefs.getString('user');
       if (userString != null) {
@@ -1043,10 +1322,10 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       debugPrint('Không thể lưu tiến độ trang: $e');
     }
   }
-
   /// Gọi lưu tiến độ trang với debounce (mặc định 600ms) để tránh gửi quá
   /// nhiều request khi người đọc vuốt trang liên tiếp.
-  void _savePageProgressDebounced(int page, {Duration delay = const Duration(milliseconds: 500)}) {
+  void _savePageProgressDebounced(int page,
+      {Duration delay = const Duration(milliseconds: 500)}) {
     if (page < 1 || storyId <= 0 || currentChapterId <= 0) return;
     _pageSaveDebounceTimer?.cancel();
     _pageSaveDebounceTimer = Timer(delay, () {
@@ -1055,7 +1334,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       _savePageProgress(page);
     });
   }
-
   /// Đọc trang đã lưu của chương (nếu có), trả về null nếu chưa có.
   Future<int?> _loadSavedPage(int chapterId) async {
     if (storyId <= 0) return null;
@@ -1069,37 +1347,32 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       return null;
     }
   }
-
   /// Nút điều hướng chương luôn chuyển chương, không phụ thuộc chế độ đọc.
   void goNext() {
     if (loading) return;
-
     if (nextId != null) {
       fetchChapter(nextId!);
     } else {
       showDialog<void>(
         context: context,
-        builder: (_) => const AlertDialog(
+        builder: (_) =>
+        const AlertDialog(
           title: Text('Thông báo'),
           content: Text('Đây là chương cuối rồi'),
         ),
       );
     }
   }
-
   /// Chuyển về chương trước và mở tại ảnh cuối của chương đó.
   void goPrev() {
     if (loading) return;
-
     if (prevId != null) {
       fetchChapter(prevId!, openAtLastPage: true);
     }
   }
-
   /// Nhảy một trang/ảnh trong chương. Chỉ khi đã ở biên mới chuyển chương.
   void goNextPage() {
     if (loading || totalPages <= 0) return;
-
     if (currentPage < totalPages) {
       final targetIndex = currentPage; // currentPage là 1-based.
       if (usePageMode) {
@@ -1115,13 +1388,10 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       }
       return;
     }
-
     goNext();
   }
-
   void goPrevPage() {
     if (loading || totalPages <= 0) return;
-
     if (currentPage > 1) {
       final targetIndex = currentPage - 2; // 0-based.
       if (usePageMode) {
@@ -1137,49 +1407,43 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       }
       return;
     }
-
     goPrev();
   }
-
   void handleReaderTap(TapUpDetails details, double width) {
     if (loading || width <= 0) return;
-
     // Khi đang phóng to trên Android, ưu tiên thao tác pan/zoom.
     if (isMobile && _mobileZoomed) return;
-
     final tapX = details.localPosition.dx;
     final zoneWidth = width / 3;
-
     // 1/3 bên trái: Trang trước.
     if (tapX < zoneWidth) {
       goPrevPage();
       return;
     }
-
     // 1/3 bên phải: Trang tiếp theo.
     if (tapX > width - zoneWidth) {
       goNextPage();
       return;
     }
-
     // 1/3 chính giữa: Không thực hiện thao tác.
   }
-
   void _jumpToImage(int imageIndex, {bool animate = false}) {
     if (imageIndex < 0 || imageIndex >= _imageKeys.length) return;
-
     if (isWindows && !usePageMode) {
       final imageObject =
       _imageKeys[imageIndex].currentContext?.findRenderObject();
       final viewportObject =
       _readerViewportKey.currentContext?.findRenderObject();
-
       if (imageObject is RenderBox &&
           imageObject.hasSize &&
           viewportObject is RenderBox &&
           viewportObject.hasSize) {
-        final imageTop = imageObject.localToGlobal(Offset.zero).dy;
-        final viewportTop = viewportObject.localToGlobal(Offset.zero).dy;
+        final imageTop = imageObject
+            .localToGlobal(Offset.zero)
+            .dy;
+        final viewportTop = viewportObject
+            .localToGlobal(Offset.zero)
+            .dy;
         final matrix = _windowsCanvasController.value.clone();
         final translation = matrix.getTranslation();
         matrix.setTranslationRaw(
@@ -1191,9 +1455,9 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       }
       return;
     }
-
     final imageContext = _imageKeys[imageIndex].currentContext;
     if (imageContext != null) {
+      _jumpToImageRetryCount = 0;
       Scrollable.ensureVisible(
         imageContext,
         alignment: 0,
@@ -1204,9 +1468,15 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       );
       return;
     }
-
-    // ListView.builder có thể chưa dựng widget ảnh ở xa. Trong trường hợp
-    // đó cuộn gần một viewport để đưa ảnh kế tiếp vào vùng cache/dựng widget.
+    // Ảnh chưa dựng widget (chưa cuộn tới). Thử lại sau một khung hình.
+    if (scrollController.hasClients && _jumpToImageRetryCount < 10) {
+      _jumpToImageRetryCount++;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _jumpToImage(imageIndex, animate: animate);
+      });
+      return;
+    }
+    _jumpToImageRetryCount = 0;
     if (scrollController.hasClients) {
       final position = scrollController.position;
       final direction = imageIndex + 1 > currentPage ? 1.0 : -1.0;
@@ -1214,7 +1484,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
           direction * position.viewportDimension)
           .clamp(0.0, position.maxScrollExtent)
           .toDouble();
-
       if (animate) {
         scrollController.animateTo(
           target,
@@ -1226,30 +1495,24 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       }
     }
   }
-
   // ============================================================
   // CUỘN VÀ ZOOM WINDOWS
   // ============================================================
-
   // ============================================================
   // WINDOWS CANVAS: CUỘN VÀ ZOOM TOÀN BỘ CHƯƠNG
   // ============================================================
-
   Size _windowsCanvasViewportSize() {
     final object = _readerViewportKey.currentContext?.findRenderObject();
     return object is RenderBox && object.hasSize ? object.size : Size.zero;
   }
-
   Size _windowsCanvasContentSize() {
     final object = _windowsCanvasKey.currentContext?.findRenderObject();
     return object is RenderBox && object.hasSize ? object.size : Size.zero;
   }
-
   Matrix4 _clampWindowsCanvasMatrix(Matrix4 source) {
     final viewport = _windowsCanvasViewportSize();
     final content = _windowsCanvasContentSize();
     if (viewport.isEmpty || content.isEmpty) return source;
-
     final matrix = source.clone();
     final scale = matrix
         .getMaxScaleOnAxis()
@@ -1258,7 +1521,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
     final scaledWidth = content.width * scale;
     final scaledHeight = content.height * scale;
     final translation = matrix.getTranslation();
-
     final minX = scaledWidth <= viewport.width
         ? (viewport.width - scaledWidth) / 2
         : viewport.width - scaledWidth;
@@ -1267,7 +1529,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         ? (viewport.height - scaledHeight) / 2
         : viewport.height - scaledHeight;
     final maxY = scaledHeight <= viewport.height ? minY : 0.0;
-
     matrix.setTranslationRaw(
       translation.x.clamp(minX, maxX).toDouble(),
       translation.y.clamp(minY, maxY).toDouble(),
@@ -1275,13 +1536,10 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
     );
     return matrix;
   }
-
   void _applyWindowsCanvasMatrix(Matrix4 matrix, {bool updateScale = true}) {
     if (!isWindows || !mounted) return;
-
     final clamped = _clampWindowsCanvasMatrix(matrix);
     _windowsCanvasController.value = clamped;
-
     if (updateScale) {
       final nextScale = clamped
           .getMaxScaleOnAxis()
@@ -1291,13 +1549,10 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         setState(() => zoomScale = nextScale);
       }
     }
-
     _scheduleReadingProgressUpdate();
   }
-
   void _translateWindowsCanvas(double dx, double dy) {
     if (!isWindows || usePageMode) return;
-
     final matrix = _windowsCanvasController.value.clone();
     final translation = matrix.getTranslation();
     matrix.setTranslationRaw(
@@ -1307,38 +1562,31 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
     );
     _applyWindowsCanvasMatrix(matrix, updateScale: false);
   }
-
   void scrollBy(double offset) {
     if (isWindows && !usePageMode) {
       _translateWindowsCanvas(0, -offset * scrollSensitivity);
       return;
     }
-
     if (!scrollController.hasClients) return;
     if (usePageMode && totalPages > 0) return;
-
     final position = scrollController.position;
     final adjustedOffset =
     isWindows ? offset * scrollSensitivity : offset;
     final target = (scrollController.offset + adjustedOffset)
         .clamp(0.0, position.maxScrollExtent)
         .toDouble();
-
     scrollController.animateTo(
       target,
       duration: const Duration(milliseconds: 160),
       curve: Curves.easeOut,
     );
   }
-
   void scrollByWheel(double delta) {
     if (!isWindows) return;
-
     if (!usePageMode) {
       _translateWindowsCanvas(0, -delta * scrollSensitivity);
       return;
     }
-
     if (!scrollController.hasClients) return;
     final position = scrollController.position;
     final target = (position.pixels + delta * scrollSensitivity)
@@ -1348,15 +1596,12 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       scrollController.jumpTo(target);
     }
   }
-
   void scrollHorizontallyByWheel(double delta) {
     if (!isWindows) return;
-
     if (!usePageMode) {
       _translateWindowsCanvas(-delta * scrollSensitivity, 0);
       return;
     }
-
     if (!_horizontalScrollController.hasClients) return;
     final position = _horizontalScrollController.position;
     final target = (position.pixels + delta * scrollSensitivity)
@@ -1366,20 +1611,16 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       _horizontalScrollController.jumpTo(target);
     }
   }
-
   void handlePointerSignal(PointerSignalEvent event) {
     if (!isWindows || event is! PointerScrollEvent) return;
-
     final delta = event.scrollDelta.dy;
     final horizontalDelta = event.scrollDelta.dx;
     final ctrlPressed = HardwareKeyboard.instance.isControlPressed;
-
     if (!ctrlPressed) {
       if (_isCtrlZooming && mounted) {
         setState(() => _isCtrlZooming = false);
         _scheduleReadingProgressUpdate();
       }
-
       final useHorizontalScroll =
           HardwareKeyboard.instance.isShiftPressed ||
               horizontalDelta.abs() > 0.0;
@@ -1392,14 +1633,11 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       }
       return;
     }
-
     if (!_isCtrlZooming && mounted) {
       setState(() => _isCtrlZooming = true);
     }
-
     final viewport = _windowsCanvasViewportSize();
     if (viewport.isEmpty) return;
-
     if (usePageMode) {
       // Chế độ từng trang vẫn giữ cơ chế zoom theo chiều rộng cũ.
       final oldScale = zoomScale;
@@ -1407,7 +1645,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
           .clamp(minZoomScale, maxZoomLimit)
           .toDouble();
       if ((nextScale - oldScale).abs() < 0.0001) return;
-
       final center = viewport.center(Offset.zero);
       final ratio = nextScale / oldScale;
       if (_horizontalScrollController.hasClients) {
@@ -1420,14 +1657,12 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       setState(() => zoomScale = nextScale);
       return;
     }
-
     final oldMatrix = _windowsCanvasController.value.clone();
     final oldScale = oldMatrix.getMaxScaleOnAxis();
     final nextScale = (oldScale * math.exp(-delta * 0.0008))
         .clamp(minZoomScale, maxZoomLimit)
         .toDouble();
     if ((nextScale - oldScale).abs() < 0.0001) return;
-
     // Zoom toàn bộ canvas quanh tâm viewport, không theo từng ảnh và
     // không phụ thuộc vị trí con trỏ chuột.
     final center = viewport.center(Offset.zero);
@@ -1437,90 +1672,63 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       ..scale(ratio)
       ..translate(-center.dx, -center.dy)
       ..multiply(oldMatrix);
-
     _applyWindowsCanvasMatrix(nextMatrix);
   }
-
   // ============================================================
   // ZOOM MOBILE
   // ============================================================
-
   void onTransformChanged() {
     final zoomed =
         transformController.value.getMaxScaleOnAxis() > 1.01;
-
     if (zoomed != _mobileZoomed && mounted) {
       setState(() {
         _mobileZoomed = zoomed;
       });
     }
   }
-
   void handleMobilePointerMove(PointerMoveEvent event) {
     if (!isMobile ||
         !_mobileZoomed ||
         _activePointers.length != 1) {
       return;
     }
-
     final size = _mobileViewport;
-
     if (size.isEmpty) return;
-
     final matrix = transformController.value.clone();
-
     final scale = matrix.getMaxScaleOnAxis();
-
     final translation = matrix.getTranslation();
-
     final minX = size.width - size.width * scale;
-
     final minY = size.height - size.height * scale;
-
     final newX =
     (translation.x + event.delta.dx)
         .clamp(minX, 0.0)
         .toDouble();
-
     final dy = event.delta.dy;
-
     final desiredY = translation.y + dy;
-
     final newY =
     desiredY.clamp(minY, 0.0).toDouble();
-
     final leftover = desiredY - newY;
-
     if (leftover != 0 && scrollController.hasClients) {
       final pos = scrollController.position;
-
       final target =
       (scrollController.offset - leftover / scale)
           .clamp(0.0, pos.maxScrollExtent)
           .toDouble();
-
       scrollController.jumpTo(target);
     }
-
     matrix.setTranslationRaw(newX, newY, 0);
-
     transformController.value = matrix;
   }
-
   // ============================================================
   // BÀN PHÍM
   // ============================================================
-
-  KeyEventResult handleKeyboardEvent(
-      FocusNode node,
-      KeyEvent event,
-      ) {
+  KeyEventResult handleKeyboardEvent(FocusNode node,
+      KeyEvent event,) {
     if (isWindows &&
         (event.logicalKey == LogicalKeyboardKey.controlLeft ||
             event.logicalKey == LogicalKeyboardKey.controlRight)) {
       final isPressed =
           event is KeyDownEvent || event is KeyRepeatEvent;
-
       if (_isCtrlZooming != isPressed && mounted) {
         setState(() {
           _isCtrlZooming = isPressed;
@@ -1529,40 +1737,31 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
           _scheduleReadingProgressUpdate();
         }
       }
-
       return KeyEventResult.handled;
     }
-
     if (event is! KeyDownEvent &&
         event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
-
     switch (event.logicalKey) {
       case LogicalKeyboardKey.arrowUp:
         scrollBy(-100);
         return KeyEventResult.handled;
-
       case LogicalKeyboardKey.arrowDown:
         scrollBy(100);
         return KeyEventResult.handled;
-
       case LogicalKeyboardKey.arrowLeft:
         if (event is KeyDownEvent) goPrev();
         return KeyEventResult.handled;
-
       case LogicalKeyboardKey.arrowRight:
         if (event is KeyDownEvent) goNext();
         return KeyEventResult.handled;
-
       default:
         return KeyEventResult.ignored;
     }
   }
-
   void handleFocusChange(bool hasFocus) {
     if (hasFocus) return;
-
     if (_isCtrlZooming && mounted) {
       setState(() {
         _isCtrlZooming = false;
@@ -1570,14 +1769,13 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       _scheduleReadingProgressUpdate();
     }
   }
-
   // ============================================================
   // SIDEBAR WINDOWS
   // ============================================================
-
   Widget buildWindowsSidebar() {
-    final colorScheme = Theme.of(context).colorScheme;
-
+    final colorScheme = Theme
+        .of(context)
+        .colorScheme;
     return Container(
       width: 64,
       color: colorScheme.surfaceContainer,
@@ -1585,13 +1783,11 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         child: Column(
           children: [
             const SizedBox(height: 8),
-
             IconButton(
               tooltip: 'Chương trước (←)',
               onPressed: loading ? null : goPrev,
               icon: const Icon(Icons.skip_previous),
             ),
-
             IconButton(
               tooltip: 'Về trang chủ',
               onPressed: () {
@@ -1602,37 +1798,29 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
               },
               icon: const Icon(Icons.home),
             ),
-
             IconButton(
               tooltip: 'Danh sách chương',
               onPressed: () =>
                   _scaffoldKey.currentState?.openDrawer(),
               icon: const Icon(Icons.menu_book),
             ),
-
             const Divider(),
-
             const Spacer(),
-
             const SizedBox(height: 12),
-
             IconButton(
               tooltip: 'Chương tiếp theo (→)',
               onPressed: loading ? null : goNext,
               icon: const Icon(Icons.skip_next),
             ),
-
             const SizedBox(height: 8),
           ],
         ),
       ),
     );
   }
-
   // ============================================================
   // ẢNH BÌA
   // ============================================================
-
   Widget buildCoverImage() {
     if (isOffline) {
       return FutureBuilder<File?>(
@@ -1651,11 +1839,8 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
               ),
             );
           }
-
           final file = snapshot.data;
-
           if (file == null) return coverPlaceholder();
-
           return Image.file(
             file,
             width: 80,
@@ -1667,7 +1852,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         },
       );
     }
-
     return CachedNetworkImage(
       imageUrl: '${ApiConfig.coverImage}/$coverUrl',
       width: 80,
@@ -1676,7 +1860,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       errorWidget: (_, __, ___) => coverPlaceholder(),
     );
   }
-
   Widget coverPlaceholder() {
     return const SizedBox(
       width: 80,
@@ -1684,13 +1867,10 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       child: Icon(Icons.book),
     );
   }
-
   // ============================================================
   // NỘI DUNG BLOCK
   // ============================================================
-
-  Widget buildBlock(
-      dynamic block,
+  Widget buildBlock(dynamic block,
       int blockIndex,
       double effectiveZoom,
       double contentWidth, {
@@ -1700,7 +1880,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
     if (block is! Map) {
       return const SizedBox.shrink();
     }
-
     if (block['type'] == 'text') {
       return Padding(
         padding: EdgeInsets.symmetric(
@@ -1716,22 +1895,17 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         ),
       );
     }
-
     if (block['type'] == 'image') {
       final imageIndex =
       _imageIndexByBlockIndex[blockIndex];
-
       if (imageIndex < 0 ||
           imageIndex >= _imageKeys.length) {
         return const SizedBox.shrink();
       }
-
       final imageName =
           block['data']?.toString() ?? '';
-
       // Không trì hoãn tải ảnh theo vị trí cuộn/trang hiện tại.
       const shouldLoad = true;
-
       return _ReaderChapterImage(
         key: _imageKeys[imageIndex],
         storyId: storyId,
@@ -1747,20 +1921,15 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         onLoadFinished: null,
       );
     }
-
     return const SizedBox.shrink();
   }
-
   // ============================================================
   // CHẾ ĐỘ CUỘN LIÊN TỤC
   // ============================================================
-
-  Widget buildScrollContent(
-      double availableWidth,
+  Widget buildScrollContent(double availableWidth,
       double availableHeight,
       double contentWidth,
-      double effectiveZoom,
-      ) {
+      double effectiveZoom,) {
     return Center(
       child: SizedBox(
         width: contentWidth,
@@ -1801,22 +1970,17 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       ),
     );
   }
-
   // ============================================================
   // CHẾ ĐỘ ĐỌC TỪNG TRANG
   // ============================================================
-
-  Widget buildSinglePageContent(
-      double contentWidth,
+  Widget buildSinglePageContent(double contentWidth,
       double effectiveZoom,
-      double availableHeight,
-      ) {
+      double availableHeight,) {
     if (totalPages == 0) {
       return const Center(
         child: Text('Chương này không có ảnh.'),
       );
     }
-
     return SizedBox.expand(
       child: PageView.builder(
         controller: _pageController,
@@ -1829,7 +1993,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         itemBuilder: (context, pageIndex) {
           final blockIndex =
           _imageBlockIndexes[pageIndex];
-
           return SizedBox.expand(
             child: Center(
               child: buildBlock(
@@ -1846,16 +2009,12 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       ),
     );
   }
-
   // ============================================================
   // DỰNG NỘI DUNG CHƯƠNG
   // ============================================================
-
-  Widget buildWindowsCanvas(
-      double availableWidth,
+  Widget buildWindowsCanvas(double availableWidth,
       double availableHeight,
-      double baseContentWidth,
-      ) {
+      double baseContentWidth,) {
     return InteractiveViewer(
       transformationController: _windowsCanvasController,
       constrained: false,
@@ -1891,36 +2050,27 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       ),
     );
   }
-
   Widget buildChapterContent() {
     return LayoutBuilder(
       builder: (context, constraints) {
         final availableWidth = constraints.maxWidth;
-
         final availableHeight = constraints.maxHeight;
-
         final desiredWidth = (availableHeight * 0.7)
             .clamp(320.0, 900.0)
             .toDouble();
-
         final baseContentWidth =
         desiredWidth < availableWidth
             ? desiredWidth
             : availableWidth;
-
         lastAvailableWidth = availableWidth;
-
         lastBaseContentWidth = baseContentWidth;
-
         final effectiveZoom =
         isWindows ? zoomScale : 1.0;
-
         if (isWindows) {
           // Không giới hạn zoom theo kích thước fit của cửa sổ.
           // Người đọc có thể phóng to đến maxZoomLimit trên mọi màn hình.
           maxAllowedZoomScale = maxZoomLimit;
         }
-
         if (isWindows && !usePageMode) {
           return SizedBox(
             width: availableWidth,
@@ -1932,12 +2082,10 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
             ),
           );
         }
-
         final contentWidth =
         (baseContentWidth * effectiveZoom)
             .clamp(1.0, 5000.0)
             .toDouble();
-
         return SizedBox(
           width: availableWidth,
           height: availableHeight,
@@ -1968,14 +2116,11 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       },
     );
   }
-
   // ============================================================
   // VÙNG ĐỌC THEO NỀN TẢNG
   // ============================================================
-
   Widget buildReaderBody() {
     final content = buildChapterContent();
-
     Widget addPageTapNavigation(Widget child) {
       return LayoutBuilder(
         builder: (context, constraints) {
@@ -1988,7 +2133,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         },
       );
     }
-
     if (isWindows) {
       return Listener(
         key: _readerViewportKey,
@@ -1997,7 +2141,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         child: addPageTapNavigation(content),
       );
     }
-
     if (isMobile) {
       return LayoutBuilder(
         builder: (context, constraints) {
@@ -2005,13 +2148,11 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
             constraints.maxWidth,
             constraints.maxHeight,
           );
-
           return Listener(
             behavior: HitTestBehavior.opaque,
             onPointerDown: (e) {
               final wasMultiTouch = _activePointers.length >= 2;
               _activePointers.add(e.pointer);
-
               // Khi ngón thứ hai chạm xuống, dừng ngay chuyển động cuộn
               // đang diễn ra để gesture pinch được ưu tiên.
               if (!wasMultiTouch && _activePointers.length >= 2) {
@@ -2073,14 +2214,11 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         },
       );
     }
-
     return addPageTapNavigation(content);
   }
-
   // ============================================================
   // THANH ĐIỀU HƯỚNG DƯỚI
   // ============================================================
-
   Widget buildBottomNavigationBar() {
     return Container(
       padding: const EdgeInsets.symmetric(
@@ -2103,10 +2241,18 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
                 tooltip: 'Chương trước',
               ),
               IconButton(
+                onPressed: _showCommentDialog,
+                icon: const Icon(
+                  Icons.comment,
+                  color: Colors.white,
+                ),
+                tooltip: 'Bình luận',
+              ),
+              IconButton(
                 onPressed: () {
                   Navigator.popUntil(
                     context,
-                    (route) => route.isFirst,
+                        (route) => route.isFirst,
                   );
                 },
                 icon: const Icon(
@@ -2159,21 +2305,17 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       ),
     );
   }
-
   // ============================================================
   // CHỌN SOURCE
   // ============================================================
-
   Widget buildSourceSelector() {
     if (sources.isEmpty) {
       return const SizedBox.shrink();
     }
-
     final selectedSource =
     sources.contains(currentSource)
         ? currentSource
         : sources.first;
-
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
       child: Column(
@@ -2181,11 +2323,12 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         children: [
           Text(
             'Nguồn truyện',
-            style: Theme.of(context).textTheme.titleSmall,
+            style: Theme
+                .of(context)
+                .textTheme
+                .titleSmall,
           ),
-
           const SizedBox(height: 8),
-
           DropdownButtonFormField<String>(
             key: ValueKey(selectedSource),
             initialValue: selectedSource,
@@ -2200,7 +2343,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
             items: sources.map((source) {
               final count =
                   getChaptersBySource(source).length;
-
               return DropdownMenuItem<String>(
                 value: source,
                 child: Text(
@@ -2222,11 +2364,9 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       ),
     );
   }
-
   // ============================================================
   // GIAO DIỆN
   // ============================================================
-
   @override
   Widget build(BuildContext context) {
     if (chapter == null) {
@@ -2255,10 +2395,8 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
         ),
       );
     }
-
     return Scaffold(
       key: _scaffoldKey,
-
       drawer: Drawer(
         child: SafeArea(
           child: ListView(
@@ -2274,9 +2412,7 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
                       BorderRadius.circular(8),
                       child: buildCoverImage(),
                     ),
-
                     const SizedBox(width: 12),
-
                     Expanded(
                       child: GestureDetector(
                         onTap: () {
@@ -2304,23 +2440,19 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
                               overflow:
                               TextOverflow.ellipsis,
                             ),
-
                             const SizedBox(height: 6),
-
                             Text('Ch. $lastChapterNumber'),
-
                             const SizedBox(height: 4),
-
                             Text(
                               'Nguồn: $currentSource',
                               maxLines: 1,
                               overflow:
                               TextOverflow.ellipsis,
-                              style: Theme.of(context)
+                              style: Theme
+                                  .of(context)
                                   .textTheme
                                   .bodySmall,
                             ),
-
                             if (isOffline)
                               const Padding(
                                 padding:
@@ -2338,9 +2470,7 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
                   ],
                 ),
               ),
-
               buildSourceSelector(),
-
               if (loading)
                 const Padding(
                   padding: EdgeInsets.all(16),
@@ -2348,7 +2478,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
                     child: CircularProgressIndicator(),
                   ),
                 ),
-
               if (!loading && chapters.isEmpty)
                 const Padding(
                   padding: EdgeInsets.all(16),
@@ -2356,7 +2485,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
                     'Source này chưa có chapter.',
                   ),
                 ),
-
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 12,
@@ -2376,19 +2504,19 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
                   itemCount: chapters.length,
                   itemBuilder: (context, chapterIndex) {
                     final c = chapters[chapterIndex];
-
                     final selectedChapterId =
                     chapterIdOf(c);
-
                     final isCurrent =
                         selectedChapterId == currentChapterId;
-
                     return Material(
                       color: isCurrent
-                          ? Theme.of(context)
+                          ? Theme
+                          .of(context)
                           .colorScheme
                           .primary
-                          : Theme.of(context).cardColor,
+                          : Theme
+                          .of(context)
+                          .cardColor,
                       borderRadius:
                       BorderRadius.circular(8),
                       child: InkWell(
@@ -2399,7 +2527,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
                             ? null
                             : () {
                           Navigator.pop(context);
-
                           fetchChapter(
                             selectedChapterId,
                           );
@@ -2419,10 +2546,12 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
                                     ? FontWeight.bold
                                     : FontWeight.normal,
                                 color: isCurrent
-                                    ? Theme.of(context)
+                                    ? Theme
+                                    .of(context)
                                     .colorScheme
                                     .onPrimary
-                                    : Theme.of(context)
+                                    : Theme
+                                    .of(context)
                                     .textTheme
                                     .bodyMedium
                                     ?.color,
@@ -2439,15 +2568,12 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
           ),
         ),
       ),
-
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
         ),
-
         centerTitle: true,
-
         title: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -2457,7 +2583,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 16),
             ),
-
             Text(
               currentSource,
               maxLines: 1,
@@ -2466,7 +2591,6 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
             ),
           ],
         ),
-
         actions: [
           IconButton(
             tooltip: 'Cài đặt đọc',
@@ -2474,57 +2598,7 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
             icon: const Icon(Icons.settings),
           ),
         ],
-
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(32),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              16,
-              0,
-              16,
-              10,
-            ),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.menu_book,
-                  size: 18,
-                ),
-
-                const SizedBox(width: 8),
-
-                Text(
-                  totalPages == 0
-                      ? 'Không có trang ảnh'
-                      : 'Trang $currentPage / $totalPages',
-                  style: const TextStyle(fontSize: 13),
-                ),
-
-                const Spacer(),
-
-                if (loading)
-                  const Text(
-                    'Đang tải chương...',
-                    style: TextStyle(fontSize: 11),
-                  )
-                else if (!allowRemainingImages &&
-                    initialImageCount > 0)
-                  const Text(
-                    'Đang tải ảnh đầu...',
-                    style: TextStyle(fontSize: 11),
-                  ),
-
-                if (isWindows)
-                  Text(
-                    '  ${(zoomScale * 100).round()}%',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-              ],
-            ),
-          ),
-        ),
       ),
-
       body: loading
           ? const Center(
         child: CircularProgressIndicator(),
@@ -2538,24 +2612,20 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
           children: [
             if (isWindows)
               buildWindowsSidebar(),
-
             Expanded(
               child: buildReaderBody(),
             ),
           ],
         ),
       ),
-
       bottomNavigationBar:
       isWindows ? null : buildBottomNavigationBar(),
     );
   }
 }
-
 // ============================================================
 // WIDGET ẢNH CHƯƠNG HỖ TRỢ OFFLINE
 // ============================================================
-
 class _ReaderChapterImage extends StatefulWidget {
   final int storyId;
   final String imageName;
@@ -2563,18 +2633,13 @@ class _ReaderChapterImage extends StatefulWidget {
   final bool offline;
   final bool shouldLoad;
   final double width;
-
   // Chỉ bật khi đọc từng trang.
   final bool pageMode;
-
   // Chỉ fit vào trang ở mức zoom gốc; khi phóng to phải giữ nguyên tỷ lệ pixel.
   final bool fitToPage;
-
   // Chiều cao vùng hiển thị một trang.
   final double pageHeight;
-
   final VoidCallback? onLoadFinished;
-
   const _ReaderChapterImage({
     super.key,
     required this.storyId,
@@ -2588,26 +2653,18 @@ class _ReaderChapterImage extends StatefulWidget {
     this.pageHeight = 0,
     this.onLoadFinished,
   });
-
   @override
   State<_ReaderChapterImage> createState() =>
       _ReaderChapterImageState();
 }
-
-class _ReaderChapterImageState
-    extends State<_ReaderChapterImage> {
+class _ReaderChapterImageState extends State<_ReaderChapterImage> {
   File? _localFile;
-
   bool _loadingLocalFile = false;
   bool _localLoadStarted = false;
   bool _notifiedFinished = false;
-
   @override
-  void didUpdateWidget(
-      covariant _ReaderChapterImage oldWidget,
-      ) {
+  void didUpdateWidget(covariant _ReaderChapterImage oldWidget,) {
     super.didUpdateWidget(oldWidget);
-
     if (oldWidget.imageName != widget.imageName ||
         oldWidget.storyId != widget.storyId ||
         oldWidget.offline != widget.offline) {
@@ -2617,60 +2674,46 @@ class _ReaderChapterImageState
       _notifiedFinished = false;
     }
   }
-
   void _notifyFinished() {
     if (_notifiedFinished) return;
-
     _notifiedFinished = true;
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         widget.onLoadFinished?.call();
       }
     });
   }
-
   Future<void> _loadLocalFile() async {
     if (_localLoadStarted || !widget.shouldLoad) {
       return;
     }
-
     _localLoadStarted = true;
     _loadingLocalFile = true;
-
     try {
       final filename = widget.imageName
           .replaceAll('\\', '/')
           .split('/')
           .last;
-
       final file =
       await OfflineEntryService.instance.getImage(
         widget.storyId,
         'chapter/$filename',
       );
-
       if (!mounted) return;
-
       setState(() {
         _localFile = file;
         _loadingLocalFile = false;
       });
-
       _notifyFinished();
     } catch (e) {
       debugPrint('Lỗi đọc ảnh Offline: $e');
-
       if (!mounted) return;
-
       setState(() {
         _loadingLocalFile = false;
       });
-
       _notifyFinished();
     }
   }
-
   Widget _placeholder() {
     return SizedBox(
       width: widget.width,
@@ -2680,7 +2723,6 @@ class _ReaderChapterImageState
       ),
     );
   }
-
   Widget _errorWidget() {
     return SizedBox(
       width: widget.width,
@@ -2694,7 +2736,6 @@ class _ReaderChapterImageState
               size: 36,
               color: Colors.grey,
             ),
-
             Text(
               widget.offline
                   ? 'Ảnh chưa có trong package Offline'
@@ -2703,7 +2744,6 @@ class _ReaderChapterImageState
                 color: Colors.grey,
               ),
             ),
-
             if (!widget.offline)
               TextButton(
                 onPressed: () {
@@ -2718,12 +2758,10 @@ class _ReaderChapterImageState
       ),
     );
   }
-
   Widget _buildImageContent() {
     if (!widget.shouldLoad) {
       return _placeholder();
     }
-
     if (!widget.offline) {
       return SequentialChapterImage(
         imageUrl: widget.imageUrl,
@@ -2732,7 +2770,6 @@ class _ReaderChapterImageState
         onLoadFinished: widget.onLoadFinished,
       );
     }
-
     if (!_localLoadStarted) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -2740,46 +2777,36 @@ class _ReaderChapterImageState
         }
       });
     }
-
     if (_loadingLocalFile || !_localLoadStarted) {
       return _placeholder();
     }
-
     final file = _localFile;
-
     if (file == null) {
       return _errorWidget();
     }
-
     return Image.file(
       file,
       width: widget.width,
       fit: BoxFit.fitWidth,
       errorBuilder: (_, __, ___) => _errorWidget(),
-      frameBuilder: (
-          context,
+      frameBuilder: (context,
           child,
           frame,
-          wasSynchronouslyLoaded,
-          ) {
+          wasSynchronouslyLoaded,) {
         if (frame != null || wasSynchronouslyLoaded) {
           _notifyFinished();
         }
-
         return child;
       },
     );
   }
-
   @override
   Widget build(BuildContext context) {
     final image = _buildImageContent();
-
     // Chế độ cuộn: giữ nguyên cách hiển thị ảnh theo chiều rộng.
     if (!widget.pageMode) {
       return image;
     }
-
     // Ở zoom gốc, giữ hành vi fit ảnh vào khung trang như trước.
     if (widget.fitToPage) {
       return SizedBox(
@@ -2799,7 +2826,6 @@ class _ReaderChapterImageState
         ),
       );
     }
-
     // Khi zoom > 100%, tuyệt đối không dùng FittedBox/contain vì chúng sẽ
     // thu ảnh trở lại vừa khung. Cho ảnh giữ nguyên kích thước theo widget.width
     // và chỉ cắt phần nằm ngoài viewport; người đọc pan bằng thanh cuộn ngang.
