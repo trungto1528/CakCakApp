@@ -736,118 +736,230 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
       Future<void> Function(int, String) editComment,
       Future<void> Function(int) deleteComment,
       void Function(int) onSetReplyingToId,
+      Set<int> expandedParentIds,
+      void Function(int) onToggleParent,
       ) {
-    // Bản tra cứu username của comment cha theo id.
+    // Bản tra cứu comment theo id và username của comment theo id.
+    final Map<int, Map<String, dynamic>> byId = {};
     final Map<int, String> parentUsernameById = {};
     for (final comment in comments) {
       final id = (comment['id'] as num).toInt();
+      byId[id] = comment;
       final name =
           comment['username'] ?? comment['displayName'] ?? 'Người dùng';
       parentUsernameById[id] = name;
     }
 
-    // Sắp xếp bình luận theo thời gian (cũ nhất lên trên).
-    final sortedComments = List<Map<String, dynamic>>.from(comments)
-      ..sort((a, b) {
+    // Tìm comment cha nhất trên (root) của một comment bằng cách đi ngược
+    // chuỗi parentId. Trả lời của trả lời sẽ được gộp về cùng cấp dưới root.
+    int findRootId(Map<String, dynamic> c) {
+      var current = c;
+      while (true) {
+        final pid = current['parentId'];
+        if (pid == null) {
+          return (current['id'] as num).toInt();
+        }
+        final parentIdInt = (pid as num).toInt();
+        final parent = byId[parentIdInt];
+        if (parent == null) {
+          return parentIdInt;
+        }
+        current = parent;
+      }
+    }
+
+    // Phân loại bình luận cha (parentId == null) và trả lời. Tất cả các trả
+    // lời (bao gồm trả lời của trả lời) đều được gom dưới comment cha nhất trên.
+    final List<Map<String, dynamic>> roots = [];
+    final Map<int, List<Map<String, dynamic>>> repliesByRoot = {};
+    for (final comment in comments) {
+      final parentId = comment['parentId'] != null
+          ? (comment['parentId'] as num).toInt()
+          : null;
+      if (parentId == null) {
+        roots.add(comment);
+      } else {
+        final rootId = findRootId(comment);
+        repliesByRoot.putIfAbsent(rootId, () => []).add(comment);
+      }
+    }
+
+    // Sắp xếp bình luận cha theo thời gian (cũ nhất trên cùng, mới nhất dưới cùng).
+    roots.sort((a, b) {
+      final da = (a['createdAt'] ?? '').toString();
+      final db = (b['createdAt'] ?? '').toString();
+      return da.compareTo(db);
+    });
+
+    // Sắp xếp các trả lời của cùng một cha theo thời gian (cũ nhất trên cùng, mới nhất dưới cùng).
+    repliesByRoot.forEach((_, list) {
+      list.sort((a, b) {
         final da = (a['createdAt'] ?? '').toString();
         final db = (b['createdAt'] ?? '').toString();
         return da.compareTo(db);
       });
+    });
 
-    return ListView.builder(
-      itemCount: sortedComments.length,
-      itemBuilder: (context, index) {
-        final c = sortedComments[index];
-        final cid = (c['id'] as num).toInt();
-        final parentId = c['parentId'] != null
-            ? (c['parentId'] as num).toInt()
-            : null;
-        final ownerId = (c['userId'] as num?)?.toInt();
-        final isOwner =
-            ownerId != null &&
-                ownerId == currentLoggedInUserId();
-        final username =
-            c['username'] ??
-                c['displayName'] ??
-                'Người dùng';
-        final content = c['content'] ?? '';
-        final created = c['createdAt'] ?? '';
-        final formattedDate = _formatCommentDate(created);
+    String buildReplyLabel(int parentId) {
+      final parent = byId[parentId];
+      if (parent == null) {
+        return 'Trả lời Người dùng';
+      }
+      final name =
+          parent['username'] ?? parent['displayName'] ?? 'Người dùng';
+      final content = (parent['content'] as String?) ?? '';
+      final shortContent = content.length > 50
+          ? '${content.substring(0, 50)}...'
+          : content;
+      return 'Trả lời $name: "$shortContent"';
+    }
 
-        return ListTile(
-          title: Text(
-            username,
-            style: const TextStyle(fontWeight: FontWeight.w600),
-          ),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(content),
-              const SizedBox(height: 4),
-              if (parentId != null) ...[
-                Text(
-                  'Trả lời ${parentUsernameById[parentId] ?? 'Người dùng'}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey.shade500,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-                const SizedBox(height: 4),
-              ],
-              Row(
-                mainAxisSize: MainAxisSize.min,
+    Widget buildCommentRow(Map<String, dynamic> c, {int indentLevel = 0}) {
+      final cid = (c['id'] as num).toInt();
+      final parentId = c['parentId'] != null
+          ? (c['parentId'] as num).toInt()
+          : null;
+      final ownerId = (c['userId'] as num?)?.toInt();
+      final isOwner =
+          ownerId != null && ownerId == currentLoggedInUserId();
+      final username =
+          c['username'] ?? c['displayName'] ?? 'Người dùng';
+      final content = c['content'] ?? '';
+      final created = c['createdAt'] ?? '';
+      final formattedDate = _formatCommentDate(created);
+
+      final replyLabel = parentId != null
+          ? buildReplyLabel(parentId)
+          : null;
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: EdgeInsets.only(left: indentLevel * 16.0),
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              leading: CircleAvatar(
+                radius: 20,
+                backgroundImage: c['avatarUrl'] != null &&
+                        c['avatarUrl'].toString().isNotEmpty
+                    ? NetworkImage(
+                        '${ApiConfig.avatarImage}/${c['avatarUrl']}',
+                      )
+                    : null,
+                child: c['avatarUrl'] == null ||
+                        c['avatarUrl'].toString().isEmpty
+                    ? const Icon(Icons.person, size: 20)
+                    : null,
+              ),
+              title: Text(
+                username,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    formattedDate,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.grey.shade600,
+                  if (replyLabel != null) ...[
+                    Text(
+                      replyLabel,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade500,
+                        fontStyle: FontStyle.italic,
+                      ),
                     ),
-                  ),
-                  if (!isOwner) ...[
-                    const SizedBox(width: 8),
-                    InkWell(
-                      onTap: () {
-                        onSetReplyingToId(cid);
-                      },
-                      child: Text(
-                        'Trả lời',
+                    const SizedBox(height: 4),
+                  ],
+                  Text(content),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        formattedDate,
                         style: TextStyle(
                           fontSize: 11,
-                          color: Colors.blue.shade700,
-                          fontWeight: FontWeight.w500,
+                          color: Colors.grey.shade600,
                         ),
                       ),
+                      if (!isOwner) ...[
+                        const SizedBox(width: 8),
+                        InkWell(
+                          onTap: () {
+                            onSetReplyingToId(cid);
+                          },
+                          child: Text(
+                            'Trả lời',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.blue.shade700,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (parentId == null &&
+                      (repliesByRoot[cid]?.isNotEmpty ?? false)) ...[
+                    IconButton(
+                      icon: Icon(
+                        expandedParentIds.contains(cid)
+                            ? Icons.expand_less
+                            : Icons.expand_more,
+                        size: 20,
+                        color: Colors.blue,
+                      ),
+                      onPressed: () => onToggleParent(cid),
+                    ),
+                  ],
+                  if (isOwner) ...[
+                    IconButton(
+                      icon: const Icon(
+                        Icons.edit,
+                        size: 20,
+                        color: Colors.blue,
+                      ),
+                      onPressed: () => editComment(cid, content),
+                    ),
+                    IconButton(
+                      icon: const Icon(
+                        Icons.delete,
+                        size: 20,
+                        color: Colors.red,
+                      ),
+                      onPressed: () => deleteComment(cid),
                     ),
                   ],
                 ],
               ),
-            ],
+            ),
           ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (isOwner) ...[
-                IconButton(
-                  icon: const Icon(
-                    Icons.edit,
-                    size: 20,
-                    color: Colors.blue,
-                  ),
-                  onPressed: () => editComment(cid, content),
-                ),
-                IconButton(
-                  icon: const Icon(
-                    Icons.delete,
-                    size: 20,
-                    color: Colors.red,
-                  ),
-                  onPressed: () => deleteComment(cid),
-                ),
-              ],
-            ],
-          ),
+        ],
+      );
+    }
+
+    return ListView.builder(
+      itemCount: roots.length,
+      itemBuilder: (context, index) {
+        final root = roots[index];
+        final cid = (root['id'] as num).toInt();
+        final isExpanded = expandedParentIds.contains(cid);
+        final replies = repliesByRoot[cid] ?? const <Map<String, dynamic>>[];
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            buildCommentRow(root, indentLevel: 0),
+            if (isExpanded && replies.isNotEmpty)
+              ...replies.map((reply) => buildCommentRow(reply, indentLevel: 1)),
+          ],
         );
       },
     );
@@ -860,6 +972,7 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
     bool posting = false;
     final TextEditingController dialogController = TextEditingController();
     int? dialogReplyingToId;
+    final Set<int> expandedParentIds = {};
     final messenger = ScaffoldMessenger.of(context);
     showDialog<void>(
       context: context,
@@ -873,6 +986,15 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
               void showDialogMessage(String message) {
                 if (!mounted) return;
                 messenger.showSnackBar(SnackBar(content: Text(message)));
+              }
+              void toggleParent(int parentId) {
+                setDialog(() {
+                  if (expandedParentIds.contains(parentId)) {
+                    expandedParentIds.remove(parentId);
+                  } else {
+                    expandedParentIds.add(parentId);
+                  }
+                });
               }
               Future<void> loadComments() async {
                 if (dialogLoading || !dialogContext.mounted) return;
@@ -1026,8 +1148,8 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
                 child: AlertDialog(
                   title: const Text('Bình luận'),
                 content: SizedBox(
-                  width: 600,
-                  height: 400,
+                  width: 750,
+                  height: 650,
                   child: Column(
                     children: [
                       Expanded(
@@ -1043,51 +1165,74 @@ abstract class ChapterReaderScreenStateBase<T extends StatefulWidget>
                               editComment,
                               deleteComment,
                               (id) => setDialog(() => dialogReplyingToId = id),
+                              expandedParentIds,
+                              toggleParent,
                             ),
                       ),
                       const SizedBox(height: 8),
                       Row(
                         children: [
                           Expanded(
-                            child: TextField(
-                              controller: dialogController,
-                              maxLines: null,
-                              minLines: 1,
-                              textInputAction: TextInputAction.send,
-                              enabled: !posting,
-                              onSubmitted: (_) =>
-                                  postComment(
-                                    dialogController.text,
-                                    parentId: dialogReplyingToId,
+                            child: RawKeyboardListener(
+                              focusNode: FocusNode(),
+                              onKey: (RawKeyEvent event) {
+                                if (event is RawKeyDownEvent &&
+                                    event.logicalKey ==
+                                        LogicalKeyboardKey.enter) {
+                                  if (!event.isShiftPressed) {
+                                    postComment(
+                                      dialogController.text,
+                                      parentId: dialogReplyingToId,
+                                    );
+                                  } else {
+                                    final text = dialogController.text;
+                                    final sel = dialogController.selection;
+                                    dialogController.text = text.replaceRange(
+                                      sel.start,
+                                      sel.end,
+                                      '\n',
+                                    );
+                                    dialogController.selection =
+                                        TextSelection.collapsed(
+                                      offset: sel.start + 1,
+                                    );
+                                  }
+                                }
+                              },
+                              child: TextField(
+                                controller: dialogController,
+                                maxLines: null,
+                                minLines: 1,
+                                enabled: !posting,
+                                decoration: InputDecoration(
+                                  hintText: dialogReplyingToId != null
+                                      ? _getParentHint(dialogReplyingToId, dialogComments)
+                                      : 'Viết bình luận...',
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(24),
                                   ),
-                              decoration: InputDecoration(
-                                hintText: dialogReplyingToId != null
-                                    ? _getParentHint(dialogReplyingToId, dialogComments)
-                                    : 'Viết bình luận...',
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(24),
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 10,
-                                ),
-                                suffixIcon: IconButton(
-                                  icon: posting
-                                      ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                      : const Icon(Icons.send, size: 20),
-                                  onPressed: posting
-                                      ? null
-                                      : () =>
-                                      postComment(
-                                        dialogController.text,
-                                        parentId: dialogReplyingToId,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 10,
+                                  ),
+                                  suffixIcon: IconButton(
+                                    icon: posting
+                                        ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
                                       ),
+                                    )
+                                        : const Icon(Icons.send, size: 20),
+                                    onPressed: posting
+                                        ? null
+                                        : () =>
+                                        postComment(
+                                          dialogController.text,
+                                          parentId: dialogReplyingToId,
+                                        ),
+                                  ),
                                 ),
                               ),
                             ),
